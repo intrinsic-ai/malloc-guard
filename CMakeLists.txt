@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.24)
 project(malloc_guard_project CXX C) 
 
 set(CMAKE_CXX_STANDARD 20)
@@ -20,17 +20,14 @@ find_package(Threads REQUIRED)
 include(FetchContent)
 
 FetchContent_Declare(plthook URL https://github.com/metacall/plthook/archive/refs/tags/v0.2.0.tar.gz)
-FetchContent_GetProperties(plthook)
-if(NOT plthook_POPULATED)
-    FetchContent_Populate(plthook)
-endif()
+FetchContent_MakeAvailable(plthook)
 
 add_library(plthook STATIC ${plthook_SOURCE_DIR}/plthook_elf.c)
 set_target_properties(plthook PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(plthook PUBLIC ${plthook_SOURCE_DIR})
 target_link_libraries(plthook PRIVATE ${CMAKE_DL_LIBS})
 
-FetchContent_Declare(googletest URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip)
+FetchContent_Declare(googletest URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz)
 FetchContent_MakeAvailable(googletest)
 
 add_library(malloc_guard SHARED
