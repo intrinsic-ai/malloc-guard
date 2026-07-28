@@ -104,7 +104,10 @@ void RtSafeLog(Args&&... args) {
 // original allocator functions (e.g., malloc, free). It assumes that
 // the underlying allocator does not change after the first allocation is
 // intercepted. If a custom allocator is loaded via dlopen() after MallocGuard
-// is initialized, it will not be used by the intercepted calls.
+// is initialized, it will not be used by the intercepted calls. Additionally,
+// loading a library into a new namespace using dlmopen() with LM_ID_NEWLM
+// is not supported and will result in a fatal error because the newly loaded
+// library will resolve to a different allocator symbol.
 
 enum class MallocGuardReaction {
   kNone,            // Do nothing on violations.

@@ -34,7 +34,7 @@ add_library(malloc_guard SHARED
     src/malloc_guard.cc
     src/malloc_guard_plthook_elf.cc
 )
-target_include_directories(malloc_guard PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(malloc_guard PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 target_include_directories(malloc_guard PRIVATE ${plthook_SOURCE_DIR})
 target_link_libraries(malloc_guard PUBLIC Threads::Threads ${CMAKE_DL_LIBS} PRIVATE plthook)
 
@@ -48,3 +48,36 @@ add_library(malloc_guard_test_lib_allowed SHARED test/malloc_guard_test_lib.cc)
 add_library(malloc_guard_test_custom_malloc_lib SHARED test/malloc_guard_test_custom_malloc.cc test/malloc_guard_test_lib.cc)
 target_link_libraries(malloc_guard_test_custom_malloc_lib PRIVATE malloc_guard gtest_main ${CMAKE_DL_LIBS})
 
+include(GNUInstallDirs)
+install(TARGETS malloc_guard
+    EXPORT malloc_guardTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT malloc_guardTargets
+    FILE malloc_guardTargets.cmake
+    NAMESPACE malloc_guard::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/malloc_guard
+)
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    "malloc_guardConfigVersion.cmake"
+    VERSION 1.0.0
+    COMPATIBILITY SameMajorVersion
+)
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/malloc_guardConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/malloc_guardConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/malloc_guard
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/malloc_guardConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/malloc_guardConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/malloc_guard
+)

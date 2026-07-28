@@ -48,16 +48,20 @@ static int HookLibraryCallback(struct dl_phdr_info* info, size_t size,
   }
 
   // dlpi_name can be empty for the main executable
-  if (libname == nullptr || libname[0] == '\0') {
+  if (libname_str.empty()) {
     if (plthook_open(&plthook, nullptr) != 0) {
       RtSafeLog("plthook_open failed for main executable: ", plthook_error());
       return 0;
     }
   } else {
-    if (std::strcmp(libname, "linux-vdso.so.1") == 0) {
+    // linux-vdso is a kernel-injected shared library (virtual dynamic shared
+    // object) used to accelerate certain syscalls. It does not use standard
+    // PLT/GOT mechanisms, so we cannot and do not need to hook it. See
+    // https://man7.org/linux/man-pages/man7/vdso.7.html
+    if (libname_str == "linux-vdso.so.1") {
       return 0;
     }
-    if (GetMallocGuardDenylist().contains(std::string(libname))) {
+    if (GetMallocGuardDenylist().contains(libname_str)) {
       return 0;
     }
     if (plthook_open(&plthook, libname) != 0) {
@@ -102,17 +106,18 @@ static int UnhookLibraryCallback(struct dl_phdr_info* info, size_t size,
                                  void* data) {
   plthook_t* plthook = nullptr;
   const char* libname = info->dlpi_name;
+  std::string libname_str = libname ? libname : "";
 
-  if (libname == nullptr || libname[0] == '\0') {
+  if (libname_str.empty()) {
     if (plthook_open(&plthook, nullptr) != 0) {
       RtSafeLog("plthook_open failed for main executable: ", plthook_error());
       return 0;
     }
   } else {
-    if (std::strcmp(libname, "linux-vdso.so.1") == 0) {
+    if (libname_str == "linux-vdso.so.1") {
       return 0;
     }
-    if (GetMallocGuardDenylist().contains(std::string(libname))) {
+    if (GetMallocGuardDenylist().contains(libname_str)) {
       return 0;
     }
     if (plthook_open(&plthook, libname) != 0) {
@@ -128,7 +133,7 @@ static int UnhookLibraryCallback(struct dl_phdr_info* info, size_t size,
       void* real_func = nullptr;
       {
         std::lock_guard<std::mutex> map_lock(original_functions_mutex);
-        auto lib_it = original_functions_map.find(libname ? libname : "");
+        auto lib_it = original_functions_map.find(libname_str);
         if (lib_it != original_functions_map.end()) {
           auto func_it = lib_it->second.find(target.name);
           if (func_it != lib_it->second.end()) {
