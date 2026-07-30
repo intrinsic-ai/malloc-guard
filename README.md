@@ -6,13 +6,49 @@
 
 ### Prerequisites
 * C++20 compatible compiler (e.g., clang, gcc)
-* Bazel build system
+* CMake 3.24+ or Bazel build system
 
-### Build 
+### Integration via CMake
 
-Add this repository to your Bazel workspace (e.g. in your `MODULE.bazel`) or build it directly:
+**1. Build and Install**
 ```bash
-bazel build //...
+mkdir build && cd build
+cmake .. 
+make -j
+# To install locally or system-wide
+sudo make install
+```
+
+**2. Link in downstream projects**
+Once installed (either globally or locally via `CMAKE_INSTALL_PREFIX`), you can seamlessly combine the library into your projects:
+
+```cmake
+find_package(malloc_guard REQUIRED)
+
+add_executable(my_application main.cc)
+target_link_libraries(my_application PRIVATE malloc_guard::malloc_guard)
+```
+
+### Integration via Bazel
+
+Add this repository to your Bazel workspace's `MODULE.bazel`:
+
+```bazel
+bazel_dep(name = "malloc_guard_playground")
+local_path_override(
+    module_name = "malloc_guard_playground",
+    path = "path/to/malloc-guard",
+)
+```
+
+Then depend on the target natively in your `BUILD` files:
+
+```bazel
+cc_binary(
+    name = "my_application",
+    srcs = ["main.cc"],
+    deps = ["@malloc_guard_playground//:malloc_guard"],
+)
 ```
 
 ## Usage

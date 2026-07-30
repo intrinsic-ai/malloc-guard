@@ -640,8 +640,8 @@ TEST(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocation) {
                               RTLD_NOW | RTLD_DEEPBIND);
         (void)handle;
       },
-      "FATAL ERROR dynamic loaded library with custom allocator detector! "
-      "Library: .*");
+      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
+      "'.*'");
 }
 
 TEST(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazy) {
@@ -654,8 +654,8 @@ TEST(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazy) {
                               RTLD_LAZY | RTLD_DEEPBIND);
         (void)handle;
       },
-      "FATAL ERROR dynamic loaded library with custom allocator detector! "
-      "Library: .*");
+      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
+      "'.*'");
 }
 
 TEST(MallocGuardTest,
@@ -669,8 +669,8 @@ TEST(MallocGuardTest,
             dlopen("./libmalloc_guard_test_custom_malloc_lib.so", RTLD_LAZY);
         (void)handle;
       },
-      "FATAL ERROR dynamic loaded library with custom allocator detector! "
-      "Library: .*");
+      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
+      "'.*'");
 }
 
 TEST(MallocGuardTest,
@@ -698,8 +698,8 @@ TEST(MallocGuardTest,
                               RTLD_LAZY | RTLD_NOLOAD);
         (void)handle;
       },
-      "FATAL ERROR dynamic loaded library with custom allocator detector! "
-      "Library: .*");
+      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
+      "'.*'");
 
   dlclose(initial_handle);
 }
@@ -714,8 +714,8 @@ TEST(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazyGlobal) {
                               RTLD_LAZY | RTLD_GLOBAL);
         (void)handle;
       },
-      "FATAL ERROR dynamic loaded library with custom allocator detector! "
-      "Library: .*");
+      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
+      "'.*'");
 }
 
 }  // namespace intrinsic
