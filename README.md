@@ -90,4 +90,4 @@ If you'd like to contribute, please review the [How to Contribute](./CONTRIBUTIN
 Licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
 
 ## Disclaimer
-This is not an officially supported Google product.
+This is not an officially supported Google product. This project is not eligible for the [Google Open Source Software Vulnerability Rewards Program](https://bughunters.google.com/open-source-security).
