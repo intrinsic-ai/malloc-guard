@@ -70,11 +70,11 @@ You first need to enable the malloc hooks globally for the lifetime of your real
 intrinsic::ScopedMallocGuardHook hook;
 
 void MyRealtimeFunction() {
-  // 2. Activate monitoring for this thread
-  intrinsic::MallocGuard guard; 
-  
-  // 3. Set the reaction to abort for any allocations
+  // 2. Set the reaction to abort for any allocations
   intrinsic::SetThreadLocalMallocGuardReaction(intrinsic::MallocGuardReaction::kAbort);
+  
+  // 3. Activate monitoring for this thread
+  intrinsic::MallocGuard guard; 
   
   while (true) {
     // Critical real-time work
