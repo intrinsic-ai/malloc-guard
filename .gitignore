@@ -3,7 +3,6 @@ MODULE.bazel.lock
 
 /build/
 /build_cmake/
-cmake/
 cmake-build/
 CMakeCache.txt
 CMakeFiles/
