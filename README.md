@@ -51,11 +51,20 @@ target_link_libraries(my_application PRIVATE malloc_guard::malloc_guard)
 Add this repository to your Bazel workspace's `MODULE.bazel`:
 
 ```bazel
-bazel_dep(name = "malloc_guard_playground")
+bazel_dep(name = "malloc_guard")
+
+# If using a local checkout:
 local_path_override(
-    module_name = "malloc_guard_playground",
+    module_name = "malloc_guard",
     path = "path/to/malloc-guard",
 )
+
+# Or, if pulling directly from git:
+# git_override(
+#     module_name = "malloc_guard",
+#     remote = "https://github.com/intrinsic-ai/malloc-guard.git",
+#     commit = "<commit_hash>",
+# )
 ```
 
 Then depend on the target natively in your `BUILD` files:
@@ -64,7 +73,7 @@ Then depend on the target natively in your `BUILD` files:
 cc_binary(
     name = "my_application",
     srcs = ["main.cc"],
-    deps = ["@malloc_guard_playground//:malloc_guard"],
+    deps = ["@malloc_guard//:malloc_guard"],
 )
 ```
 

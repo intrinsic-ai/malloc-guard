@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-module(name = "malloc_guard_playground")
-
-
+module(name = "malloc_guard")
 
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2", repo_name = "com_google_googletest")
 bazel_dep(name = "rules_cc", version = "0.1.0")
