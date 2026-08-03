@@ -20,7 +20,7 @@ sudo make install
 ```
 
 **2. Link in downstream projects**
-Once installed (either globally or locally via `CMAKE_INSTALL_PREFIX`), you can seamlessly combine the library into your projects:
+Once installed (either globally or locally via `CMAKE_INSTALL_PREFIX`), you can link against the library in your projects:
 
 ```cmake
 find_package(malloc_guard REQUIRED)
