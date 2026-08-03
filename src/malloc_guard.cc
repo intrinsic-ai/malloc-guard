@@ -14,6 +14,12 @@
 
 #include "intrinsic/malloc_guard.h"
 
+// gcc does not support the clang-specific __has_feature macro,
+// therefore this fallback will gracefully evaluate to 0 (false)
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
 #include <asm/unistd_64.h>
 #include <dlfcn.h>
 #include <execinfo.h>

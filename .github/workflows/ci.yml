@@ -17,6 +17,9 @@ jobs:
   build-cmake:
     name: Build & Test (CMake)
     runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
     steps:
     - uses: actions/checkout@v4
 
@@ -40,6 +43,9 @@ jobs:
   build-bazel:
     name: Build & Test (Bazel)
     runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
     steps:
     - uses: actions/checkout@v4
 
