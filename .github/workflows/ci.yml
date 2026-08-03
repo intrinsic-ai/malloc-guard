@@ -1,0 +1,62 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-cmake:
+    name: Build & Test (CMake)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # CMake Caching
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ${{ runner.os }}-cmake
+
+    # Hook ccache into the CMake config
+    - name: Configure CMake
+      run: cmake -B build -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Test
+      working-directory: build
+      run: ctest --output-on-failure
+
+  build-bazel:
+    name: Build & Test (Bazel)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # Bazel Caching
+    - name: Mount Bazel Disk Cache
+      uses: actions/cache@v4
+      with:
+        path: "~/.cache/bazel-disk-cache"
+        key: bazel-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE') }}
+        restore-keys: |
+          bazel-${{ runner.os }}-
+
+    - name: Test via Bazel
+      run: >
+        bazel test //... 
+        --cxxopt=-std=c++20 
+        --host_cxxopt=-std=c++20 
+        --test_output=errors 
+        --disk_cache=~/.cache/bazel-disk-cache 
+        --keep_going
