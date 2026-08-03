@@ -1,5 +1,5 @@
 # This file uses YAML syntax.
-# F0r more about Google style guides check https://google.github.io/styleguide/cppguide.html
+# For more about Google style guides check https://google.github.io/styleguide/cppguide.html
 ---
 # Inherit the official Google C++ Style Guide as the foundation.
 BasedOnStyle: Google

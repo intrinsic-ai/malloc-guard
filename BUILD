@@ -24,8 +24,8 @@ cc_library(
         "src/malloc_guard_plthook_elf.cc",
     ],
     hdrs = [
-        "include/malloc_guard.h",
-        "include/malloc_guard_plthook_elf.h",
+        "include/intrinsic/malloc_guard.h",
+        "include/intrinsic/malloc_guard_plthook_elf.h",
     ],
     strip_include_prefix = "include",
     deps = ["@plthook"],

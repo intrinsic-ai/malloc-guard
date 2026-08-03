@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "malloc_guard.h"
+#include "intrinsic/malloc_guard.h"
 
 #include <asm/unistd_64.h>
 #include <dlfcn.h>
@@ -33,7 +33,7 @@
 #include <string_view>
 #include <unordered_set>
 
-#include "malloc_guard_plthook_elf.h"
+#include "intrinsic/malloc_guard_plthook_elf.h"
 
 extern "C" {
 void* malloc_guard_intercept_malloc(std::size_t);

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "malloc_guard.h"
+#include "intrinsic/malloc_guard.h"
 
 #include <dlfcn.h>
 #include <gmock/gmock.h>

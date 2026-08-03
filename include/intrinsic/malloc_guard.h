@@ -198,13 +198,13 @@ struct MallocGuardViolations {
 // evaluated. Prefer to use ScopedMallocGuardHook, which calls this function, if
 // possible.
 //
-// Returns InternalError when enabling the hook fails.
+// Returns false when enabling the hook fails.
 bool InstallMallocGuardHooks();
 
 // Decreases the internal enable-counter and disables the hook if the counter
 // reaches 0 (thread-safe).
 //
-// Returns InternalError when disabling the hook fails or when this function
+// Returns false when disabling the hook fails or when this function
 // was called more often than the corresponding `InstallMallocGuardHooks()`.
 bool UninstallMallocGuardHooks();
 
@@ -234,15 +234,17 @@ class ScopedMallocGuardHook {
   // active/not-active. For example pass a flag from a config file to this
   // constructor.
   explicit ScopedMallocGuardHook(bool ignore = false) : ignore_(ignore) {
-    if (!ignore) {
-      if (!InstallMallocGuardHooks()) {
+    if (!ignore) [[likely]] {
+      if (!InstallMallocGuardHooks()) [[unlikely]] {
+        RtSafeLog("FATAL: Failed to install malloc guard hooks.");
         std::abort();
       }
     }
   }
   ~ScopedMallocGuardHook() {
-    if (!ignore_) {
-      if (!UninstallMallocGuardHooks()) {
+    if (!ignore_) [[likely]] {
+      if (!UninstallMallocGuardHooks()) [[unlikely]] {
+        RtSafeLog("FATAL: Failed to uninstall malloc guard hooks.");
         std::abort();
       }
     }

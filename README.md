@@ -58,7 +58,7 @@ cc_binary(
 Include the main header in your C++ source files:
 
 ```cpp
-#include "malloc_guard.h"
+#include "intrinsic/malloc_guard.h"
 ```
 
 ### Protect real-time sections
