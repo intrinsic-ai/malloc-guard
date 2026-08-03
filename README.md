@@ -10,7 +10,25 @@
 
 ### Integration via CMake
 
-**1. Build and Install**
+#### Option 1: FetchContent
+You can include this library directly in your CMake project using `FetchContent`:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+    malloc_guard
+    GIT_REPOSITORY https://github.com/intrinsic-ai/malloc-guard.git
+    GIT_TAG        main # Or a specific tag/commit hash
+)
+FetchContent_MakeAvailable(malloc_guard)
+
+add_executable(my_application main.cc)
+target_link_libraries(my_application PRIVATE malloc_guard::malloc_guard)
+```
+
+#### Option 2: Build and Install
+Alternatively, you can build and install the library system-wide or to a custom prefix:
+
 ```bash
 mkdir build && cd build
 cmake .. 
@@ -19,7 +37,6 @@ make -j
 sudo make install
 ```
 
-**2. Link in downstream projects**
 Once installed (either globally or locally via `CMAKE_INSTALL_PREFIX`), you can link against the library in your projects:
 
 ```cmake

@@ -49,6 +49,7 @@ add_library(malloc_guard SHARED
 )
 
 target_compile_features(malloc_guard PUBLIC cxx_std_20)
+add_library(malloc_guard::malloc_guard ALIAS malloc_guard)
 
 if(ENABLE_RTSAN)
     target_compile_options(malloc_guard PUBLIC -fsanitize=realtime)
