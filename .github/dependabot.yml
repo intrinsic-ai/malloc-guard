@@ -1,0 +1,26 @@
+version: 2
+updates:
+- package-ecosystem: "github-actions"
+  directory: "/"
+  schedule:
+      interval: "daily"
+  commit-message:
+      prefix: ":seedling:"
+  labels:
+    - "dependencies"
+  groups:
+    actions-dependencies:
+      patterns:
+        - "*"
+- package-ecosystem: "bazel"
+  directory: "/"
+  schedule:
+      interval: "daily"
+  commit-message:
+      prefix: ":seedling:"
+  labels:
+    - "dependencies"
+  groups:
+    bazel-dependencies:
+      patterns:
+        - "*"
