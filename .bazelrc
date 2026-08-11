@@ -1,0 +1,43 @@
+# Use C++20.
+common --cxxopt='-std=c++20'
+common --host_cxxopt='-std=c++20'
+
+# Address sanitizer
+common:asan --strip=never
+common:asan --copt -fsanitize=address
+common:asan --copt -DADDRESS_SANITIZER
+common:asan --copt -O1
+common:asan --copt -g
+common:asan --copt -fno-omit-frame-pointer
+common:asan --linkopt -fsanitize=address
+test:asan --test_tag_filters=-noasan
+
+# Memory sanitizer
+common:msan --strip=never
+common:msan --copt -fsanitize=memory
+common:msan --copt -DMEMORY_SANITIZER
+common:msan --copt -O1
+common:msan --copt -g
+common:msan --copt -fno-omit-frame-pointer
+common:msan --linkopt -fsanitize=memory
+test:msan --test_tag_filters=-nomsan
+
+# Thread sanitizer
+common:tsan --strip=never
+common:tsan --copt -fsanitize=thread
+common:tsan --copt -DTHREAD_SANITIZER
+common:tsan --copt -O1
+common:tsan --copt -g
+common:tsan --copt -fno-omit-frame-pointer
+common:tsan --linkopt -fsanitize=thread
+test:tsan --test_tag_filters=-notsan
+
+# Realtime sanitizer
+common:rtsan --strip=never
+common:rtsan --copt -fsanitize=realtime
+common:rtsan --copt -DREALTIME_SANITIZER
+common:rtsan --copt -O1
+common:rtsan --copt -g
+common:rtsan --copt -fno-omit-frame-pointer
+common:rtsan --linkopt -fsanitize=realtime
+test:rtsan --test_tag_filters=-nortsan
