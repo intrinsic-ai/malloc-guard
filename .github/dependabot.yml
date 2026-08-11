@@ -15,7 +15,7 @@ updates:
 - package-ecosystem: "bazel"
   directory: "/"
   schedule:
-    interval: "daily"
+      interval: "daily"
   commit-message:
       prefix: ":seedling:"
   labels:
