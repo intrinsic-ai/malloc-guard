@@ -8,8 +8,3 @@ BasedOnStyle: Google
 SortIncludes: true
 
 Language: Cpp
-
----
-
-Language: Proto
-BasedOnStyle: Google
