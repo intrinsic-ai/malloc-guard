@@ -109,11 +109,33 @@ void MyRealtimeFunction() {
 }
 ```
 
-## How to contribute
-If you'd like to contribute, please review the [How to Contribute](./CONTRIBUTING.md) guide.
+---
+
+## Documentation and related repositories
+
+* [**Intrinsic Developer Community**](https://developer.intrinsic.ai): Complete guides, interactive tutorials, and API references.
+
+---
+
+## Contributing and community
+
+Contributions are welcome! Please review:
+
+* [CONTRIBUTING.md](CONTRIBUTING.md): Details on signing the Google Contributor License Agreement (CLA), community guidelines, C++20 coding standards, and pull request workflows.  
+* [SECURITY.md](SECURITY.md): Instructions for reporting security vulnerabilities.
+
+---
 
 ## License
-Licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
 
-## Disclaimer
-This is not an officially supported Google product. This project is not eligible for the [Google Open Source Software Vulnerability Rewards Program](https://bughunters.google.com/open-source-security).
+This project is licensed under the [Apache 2.0 License](LICENSE).
+
+---
+
+> **Disclaimer**: This is not an officially supported Google product.
+
+---
+
+### Trademark notice
+
+"Intrinsic" and "Intrinsic Core" are trademarks of Intrinsic Innovation LLC. See [TRADEMARK.md](TRADEMARK.md) for usage guidelines.
