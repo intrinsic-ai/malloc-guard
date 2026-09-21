@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 
 package(
-    default_visibility = ["//visibility:public"])
+    default_visibility = ["//visibility:public"],
+)
 
 cc_library(
     name = "malloc_guard",
@@ -34,16 +35,26 @@ cc_library(
 cc_test(
     name = "malloc_guard_test",
     srcs = ["test/malloc_guard_test.cc"],
+    data = [
+        ":libmalloc_guard_test_custom_malloc_lib.so",
+        ":libmalloc_guard_test_lib.so",
+        ":libmalloc_guard_test_lib_allowed.so",
+    ],
+    linkopts = ["-ldl"],
     deps = [
         ":malloc_guard",
         "@com_google_googletest//:gtest_main",
     ],
-    data = [
-        ":libmalloc_guard_test_lib.so",
-        ":libmalloc_guard_test_lib_allowed.so",
-        ":libmalloc_guard_test_custom_malloc_lib.so",
-    ],
+)
+
+cc_test(
+    name = "malloc_guard_static_allocator_hook_test",
+    srcs = ["test/malloc_guard_static_allocator_hook_test.cc"],
     linkopts = ["-ldl"],
+    deps = [
+        ":malloc_guard",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
 
 cc_binary(
@@ -66,4 +77,3 @@ cc_binary(
     ],
     linkshared = True,
 )
-
