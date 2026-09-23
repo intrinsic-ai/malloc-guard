@@ -77,6 +77,31 @@ cc_binary(
 )
 ```
 
+## Testing
+
+The section above covers using `malloc-guard` from another project. To build and
+test the library itself, use either build system. Both sets of commands build
+everything and run the full test suite.
+
+### CMake
+
+```bash
+cmake -B build
+cmake --build build --parallel
+cd build && ctest --output-on-failure
+```
+
+### Bazel
+
+```bash
+bazel test //...
+```
+
+Note that the tests `dlopen()` shared libraries from the current working
+directory. Run them through `ctest` or `bazel test`, which take care of this. If
+you invoke a test binary directly, do so from the directory that contains the
+test's shared libraries.
+
 ## Usage
 
 ### Import the library
@@ -108,6 +133,76 @@ void MyRealtimeFunction() {
   }
 }
 ```
+
+### Statically-linked allocators
+
+Interception normally works by rewriting GOT/PLT entries, which only covers
+allocator calls that go through the dynamic linker. Most projects link their
+allocator dynamically and need nothing beyond the setup above. That includes
+replacement allocators such as TCMalloc, jemalloc or mimalloc, as long as they
+are loaded as shared libraries.
+
+If your binary instead links its allocator **statically**, those call sites are
+bound at link time and cannot be hooked that way.
+
+For this case, link a translation unit that defines the following two functions
+in the `intrinsic` namespace. MallocGuard picks them up automatically if they
+are present, and calls them when hooks are installed and uninstalled:
+
+```cpp
+namespace intrinsic {
+namespace {
+
+// Forwards every allocation to MallocGuard. Your allocator calls this on each
+// allocation, including outside of guarded scopes, so it bails out as early as
+// possible.
+void MyHook(size_t requested_size) {
+  if (!AreMallocGuardHooksInstalled() || !MallocGuard::IsMallocGuarded())
+      [[likely]] {
+    return;
+  }
+  ReportAllocation(requested_size);
+}
+
+}  // namespace
+
+// Register your allocator's native allocation hook here.
+bool MallocGuardCustomSetup() {
+  return MyAllocator::AddAllocationHook(&MyHook);
+}
+
+// Undo whatever MallocGuardCustomSetup() did.
+bool MallocGuardCustomTeardown() {
+  return MyAllocator::RemoveAllocationHook(&MyHook);
+}
+
+}  // namespace intrinsic
+```
+
+You must define **both** functions or neither; defining only one is a fatal
+error. `MallocGuardCustomSetup()` and `MallocGuardCustomTeardown()` run in
+non-real-time contexts, but the hook itself must assume it runs in a real-time
+context and must not block.
+
+### Limitations
+
+MallocGuard detects the following unsupported setups and fails fast with a
+diagnostic rather than silently under-reporting allocations:
+
+* **`RTLD_DEEPBIND`** — libraries loaded with this flag prefer their own symbol
+  definitions and bypass interception.
+* **A dlopen'd library with its own allocator** — the library would allocate
+  through an allocator MallocGuard does not observe.
+* **`dlmopen()` with `LM_ID_NEWLM`** — the new namespace resolves to a different
+  allocator.
+* **Denylisting combined with a statically-linked allocator** — a native
+  allocator hook fires process-wide and cannot attribute an allocation to the
+  library that requested it, so the two features are mutually exclusive.
+
+Note also that denylisting a library only suppresses allocations made from call
+sites *inside* that library. If it allocates via `new`, the allocation is
+actually performed by the C++ runtime, which is still hooked unless it is
+denylisted too.
 
 ---
 
