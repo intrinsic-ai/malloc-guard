@@ -18,8 +18,8 @@ package(
     default_visibility = ["//visibility:public"],
 )
 
-# MallocGuard is a no-op under allocator-replacing sanitizers, so its tests
-# can't pass there.
+# `MallocGuard` is a no-op under allocator-replacing sanitizers, so its tests
+# are not allowed to be run with the following sanitizers.
 SANITIZER_EXCLUSION_TAGS = [
     "noasan",
     "nomsan",

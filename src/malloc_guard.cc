@@ -97,7 +97,7 @@ namespace {
 #endif
 
 // ASan, MSan and TSan replace the allocator, which conflicts with the malloc
-// hooks, so MallocGuard is a no-op under them.
+// hooks, so `MallocGuard` is a no-op when used with them.
 #if defined(ADDRESS_SANITIZER) || defined(__SANITIZE_ADDRESS__) || \
     defined(MEMORY_SANITIZER) || defined(__SANITIZE_MEMORY__) ||   \
     defined(THREAD_SANITIZER) || defined(__SANITIZE_THREAD__) ||   \

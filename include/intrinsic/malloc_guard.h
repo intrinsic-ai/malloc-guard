@@ -147,7 +147,7 @@ void RtSafeLog(Args&&... args) {
 // * Sanitizers: When compiled with allocator-replacing sanitizers
 //   (AddressSanitizer, MemorySanitizer, ThreadSanitizer), MallocGuard is
 //   automatically disabled and acts as a no-op, allowing code using
-//   MallocGuard to be debugged with sanitizers. Note that RealtimeSanitizer
+//   `MallocGuard` to be debugged with sanitizers. Note that RealtimeSanitizer
 //   (RTSan) is supported and remains enabled.
 
 // Sets up an allocator hook that reports any allocations to `MallocGuard` via
