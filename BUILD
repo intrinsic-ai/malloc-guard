@@ -18,6 +18,14 @@ package(
     default_visibility = ["//visibility:public"],
 )
 
+# `MallocGuard` is a no-op under allocator-replacing sanitizers, so its tests
+# are not allowed to be run with the following sanitizers.
+SANITIZER_EXCLUSION_TAGS = [
+    "noasan",
+    "nomsan",
+    "notsan",
+]
+
 cc_library(
     name = "malloc_guard",
     srcs = [
@@ -41,6 +49,7 @@ cc_test(
         ":libmalloc_guard_test_lib_allowed.so",
     ],
     linkopts = ["-ldl"],
+    tags = SANITIZER_EXCLUSION_TAGS,
     deps = [
         ":malloc_guard",
         "@com_google_googletest//:gtest_main",
@@ -51,6 +60,7 @@ cc_test(
     name = "malloc_guard_static_allocator_hook_test",
     srcs = ["test/malloc_guard_static_allocator_hook_test.cc"],
     linkopts = ["-ldl"],
+    tags = SANITIZER_EXCLUSION_TAGS,
     deps = [
         ":malloc_guard",
         "@com_google_googletest//:gtest_main",
