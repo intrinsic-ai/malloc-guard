@@ -154,6 +154,9 @@ bool IsInMallocHook() { return in_malloc_hook > 0; }
 }  // end anonymous namespace
 
 void ReportAllocation(size_t size) {
+#if MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER
+  return;
+#endif
   // Prevent recursive loop due to printing in MallocGuardReaction::kAbort mode.
   if (IsInMallocHook()) [[unlikely]] {
     return;
@@ -254,6 +257,9 @@ void RtSafeLogImpl(const void* ptr) {
 }  // namespace internal
 
 bool CheckMallocHandlerInstalled(bool silent) {
+#if MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER
+  return true;
+#endif
   bool success = true;
   ResetThreadLocalMallocViolations();
   auto installed_reaction = thread_local_malloc_guard_reaction;
@@ -393,6 +399,15 @@ bool CheckMallocHandlerInstalled(bool silent) {
 }
 
 bool InstallMallocGuardHooks() {
+#if MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER
+  static std::once_flag log_once;
+  std::call_once(log_once, []() {
+    RtSafeLog(
+        "INFO: MallocGuard is disabled because an allocator-replacing "
+        "sanitizer (ASan/MSan/TSan) is active.\n");
+  });
+  return true;
+#endif
   // We intentionally lock the mutex for the entire duration of this function
   // to prevent race conditions during initialization, not just to protect the
   // counter increment.
@@ -447,6 +462,9 @@ bool InstallMallocGuardHooks() {
 }
 
 bool UninstallMallocGuardHooks() {
+#if MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER
+  return true;
+#endif
   std::lock_guard<std::mutex> lock(malloc_guard_install_counter_mutex);
   int new_value = --malloc_guard_install_counter;
   if (new_value == 0) {
@@ -476,8 +494,9 @@ bool UninstallMallocGuardHooks() {
   return true;
 }
 
-MallocGuard::MallocGuard(bool ignore) : ignore_(ignore) {
-  if (!ignore) {
+MallocGuard::MallocGuard(bool ignore)
+    : ignore_(ignore || MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER) {
+  if (!ignore_) {
     if (!AreMallocGuardHooksInstalled()) {
       RtSafeLog(
           "Malloc hook is not enabled. Call InstallMallocGuardHooks() or "
@@ -517,6 +536,9 @@ bool MallocGuard::IsMallocGuarded() {
 }
 
 ScopedMallocGuardIgnore::ScopedMallocGuardIgnore() {
+#if MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER
+  return;
+#endif
   local_ignore_counter++;
 #if __has_feature(realtime_sanitizer)
   if (local_malloc_guard_counter > 0 && local_ignore_counter == 1) {
@@ -527,6 +549,9 @@ ScopedMallocGuardIgnore::ScopedMallocGuardIgnore() {
 }
 
 ScopedMallocGuardIgnore::~ScopedMallocGuardIgnore() {
+#if MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER
+  return;
+#endif
   local_ignore_counter--;
 #if __has_feature(realtime_sanitizer)
   if (disabled_rtsan_ && local_ignore_counter == 0) {

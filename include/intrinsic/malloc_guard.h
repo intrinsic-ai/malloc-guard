@@ -42,6 +42,25 @@
 #include <sanitizer/rtsan_interface.h>
 #endif
 
+#if defined(__has_feature)
+#define MALLOC_GUARD_HAS_SANITIZER                                        \
+  (__has_feature(address_sanitizer) || __has_feature(memory_sanitizer) || \
+   __has_feature(thread_sanitizer))
+#else
+#define MALLOC_GUARD_HAS_SANITIZER 0
+#endif
+
+#if defined(ADDRESS_SANITIZER) || defined(__SANITIZE_ADDRESS__) || \
+    defined(MEMORY_SANITIZER) || defined(__SANITIZE_MEMORY__) ||   \
+    defined(THREAD_SANITIZER) || defined(__SANITIZE_THREAD__) ||   \
+    MALLOC_GUARD_HAS_SANITIZER
+#define MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER 1
+#else
+#define MALLOC_GUARD_DISABLED_BY_ALLOCATOR_SANITIZER 0
+#endif
+
+#undef MALLOC_GUARD_HAS_SANITIZER
+
 #if defined(__clang__) && defined(__has_attribute)
 #if __has_attribute(clang_nonblocking)
 #define MALLOC_GUARD_NONBLOCKING [[clang::nonblocking]]
@@ -144,6 +163,11 @@ void RtSafeLog(Args&&... args) {
 //   causes a fatal error.
 // * Loading libraries with RTLD_DEEPBIND is not allowed. Doing so after
 //   `InstallMallocGuardHooks()` causes a fatal error.
+// * Sanitizers: When compiled with allocator-replacing sanitizers
+//   (AddressSanitizer, MemorySanitizer, ThreadSanitizer), MallocGuard is
+//   automatically disabled and acts as a no-op, allowing code using
+//   MallocGuard to be debugged with sanitizers. Note that RealtimeSanitizer
+//   (RTSan) is supported and remains enabled.
 
 // Sets up an allocator hook that reports any allocations to `MallocGuard` via
 // `ReportAllocation()`. `MallocGuard` always pairs calls to this with calls to
