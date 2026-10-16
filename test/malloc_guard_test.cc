@@ -36,6 +36,13 @@ using testing::HasSubstr;
 namespace intrinsic {
 
 namespace {
+// Declare constants as C-style strings, because we pass them to C-style APIs
+// and rely on them being zero-terminated.
+constexpr char kTestLibPath[] = "./libmalloc_guard_test_lib.so";
+constexpr char kAllowedTestLibPath[] = "./libmalloc_guard_test_lib_allowed.so";
+constexpr char kCustomMallocTestLibPath[] =
+    "./libmalloc_guard_test_custom_malloc_lib.so";
+
 void BadMalloc4Bytes() {
   // Global variable to make sure that the compiler doesn't optimize the
   // code.
@@ -46,28 +53,38 @@ void BadMalloc4Bytes() {
 }
 }  // namespace
 
-TEST(MallocGuardTest, EnableSucceeds) {
+class MallocGuardTest : public ::testing::Test {
+ protected:
+  // Reset denylist before every test.
+  MallocGuardTest() { SetMallocGuardDenylist({}); }
+  ~MallocGuardTest() override {
+    // Reset denylist after every test, too.
+    SetMallocGuardDenylist({});
+  }
+};
+
+TEST_F(MallocGuardTest, EnableSucceeds) {
   EXPECT_FALSE(AreMallocGuardHooksInstalled());
   ScopedMallocGuardHook hook;
   EXPECT_TRUE(AreMallocGuardHooksInstalled());
 }
 
-TEST(MallocGuardTest, DisableSucceeds) {
+TEST_F(MallocGuardTest, DisableSucceeds) {
   {
     ScopedMallocGuardHook hook;
   }
   EXPECT_FALSE(AreMallocGuardHooksInstalled());
 }
 
-TEST(MallocGuardTest, MallocHookCountViolation) {
+TEST_F(MallocGuardTest, MallocHookCountViolation) {
   EXPECT_FALSE(UninstallMallocGuardHooks());
 }
 
-TEST(MallocGuardTest, MallocGuardWithoutHookViolation) {
+TEST_F(MallocGuardTest, MallocGuardWithoutHookViolation) {
   EXPECT_DEATH([] { MallocGuard g; }(), "InstallMallocGuardHooks");
 }
 
-TEST(MallocGuardTest, DoesNotCountViolationsWithoutGuard) {
+TEST_F(MallocGuardTest, DoesNotCountViolationsWithoutGuard) {
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
   ResetThreadLocalMallocViolations();
   ScopedMallocGuardHook hook;
@@ -77,7 +94,7 @@ TEST(MallocGuardTest, DoesNotCountViolationsWithoutGuard) {
   EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 0u);
 }
 
-TEST(MallocGuardTest, ResetViolationsWorks) {
+TEST_F(MallocGuardTest, ResetViolationsWorks) {
   SetThreadLocalMallocGuardReaction(
       MallocGuardReaction::kStoreViolationWithTrace);
   ResetThreadLocalMallocViolations();
@@ -103,7 +120,7 @@ TEST(MallocGuardTest, ResetViolationsWorks) {
                    .latest_violation_stack_trace.has_value());
 }
 
-TEST(MallocGuardTest, GenerateStackTraceInLog) {
+TEST_F(MallocGuardTest, GenerateStackTraceInLog) {
   ::testing::internal::CaptureStderr();
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kLogWithTrace);
   ResetThreadLocalMallocViolations();
@@ -117,7 +134,7 @@ TEST(MallocGuardTest, GenerateStackTraceInLog) {
   EXPECT_THAT(output, HasSubstr("Encountered malloc in realtime thread"));
 }
 
-TEST(MallocGuardTest, MallocIsCaughtAndPrinted) {
+TEST_F(MallocGuardTest, MallocIsCaughtAndPrinted) {
   ::testing::internal::CaptureStderr();
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kLog);
   ResetThreadLocalMallocViolations();
@@ -131,7 +148,7 @@ TEST(MallocGuardTest, MallocIsCaughtAndPrinted) {
                             HasSubstr("Allocated 4 bytes")));
 }
 
-TEST(MallocGuardTest, ReactionSwitchWorks) {
+TEST_F(MallocGuardTest, ReactionSwitchWorks) {
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kLog);
   EXPECT_EQ(GetCurrentMallocGuardReaction(), MallocGuardReaction::kLog);
   ResetThreadLocalMallocViolations();
@@ -162,7 +179,7 @@ TEST(MallocGuardTest, ReactionSwitchWorks) {
   }
 }
 
-TEST(MallocGuardTest, ScopedThreadLocalReactionWorks) {
+TEST_F(MallocGuardTest, ScopedThreadLocalReactionWorks) {
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
   ScopedMallocGuardHook hook;
   MallocGuard guard;
@@ -191,7 +208,7 @@ TEST(MallocGuardTest, ScopedThreadLocalReactionWorks) {
   EXPECT_EQ(GetCurrentMallocGuardReaction(), MallocGuardReaction::kLog);
 }
 
-TEST(MallocGuardTest, MallocCaughtLeadsToAbort) {
+TEST_F(MallocGuardTest, MallocCaughtLeadsToAbort) {
   ScopedMallocGuardHook hook;
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kAbort);
 
@@ -204,7 +221,7 @@ TEST(MallocGuardTest, MallocCaughtLeadsToAbort) {
       "Encountered malloc");
 }
 
-TEST(MallocGuardTest, LocalTrumpsGlobalReaction) {
+TEST_F(MallocGuardTest, LocalTrumpsGlobalReaction) {
   ScopedMallocGuardHook hook;
   ResetThreadLocalMallocViolations();
   SetThreadLocalMallocGuardReaction({});
@@ -219,7 +236,7 @@ TEST(MallocGuardTest, LocalTrumpsGlobalReaction) {
   EXPECT_NE(GetThreadLocalMallocViolations().num_violations, 0u);
 }
 
-TEST(MallocGuardTest, LocalReactionCanBeDeleted) {
+TEST_F(MallocGuardTest, LocalReactionCanBeDeleted) {
   ScopedMallocGuardHook hook;
   ResetThreadLocalMallocViolations();
   SetGlobalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
@@ -233,7 +250,7 @@ TEST(MallocGuardTest, LocalReactionCanBeDeleted) {
   EXPECT_NE(GetThreadLocalMallocViolations().num_violations, 0u);
 }
 
-TEST(MallocGuardTest, MallocCaught) {
+TEST_F(MallocGuardTest, MallocCaught) {
   ScopedMallocGuardHook hook;
   MallocGuard guard;
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
@@ -248,7 +265,7 @@ TEST(MallocGuardTest, MallocCaught) {
   EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 1u);
 }
 
-TEST(MallocGuardTest, ArrayMallocCaught) {
+TEST_F(MallocGuardTest, ArrayMallocCaught) {
   ScopedMallocGuardHook hook;
   MallocGuard guard;
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
@@ -264,7 +281,7 @@ TEST(MallocGuardTest, ArrayMallocCaught) {
             40 * sizeof(*kNewPtr));
 }
 
-TEST(MallocGuardTest, NoThreadCrossTalk) {
+TEST_F(MallocGuardTest, NoThreadCrossTalk) {
   auto malloc_worker = [] {
     ScopedMallocGuardHook hook;
     SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
@@ -286,7 +303,7 @@ TEST(MallocGuardTest, NoThreadCrossTalk) {
   t2.join();
 }
 
-TEST(MallocGuardTest, GlobalCallbackWorks) {
+TEST_F(MallocGuardTest, GlobalCallbackWorks) {
   ScopedMallocGuardHook hook;
   // The callback is a function pointer, not a std::function, so it cannot be a
   // capturing lambda. Therefore, this must be static
@@ -305,7 +322,7 @@ TEST(MallocGuardTest, GlobalCallbackWorks) {
   EXPECT_EQ(callback_called.load(), 4u);
 }
 
-TEST(MallocGuardTest, ThreadLocalCallbackOverridesGlobalCallback) {
+TEST_F(MallocGuardTest, ThreadLocalCallbackOverridesGlobalCallback) {
   ScopedMallocGuardHook hook;
   // Callbacks must be captureless lambdas to decay to function pointers,
   // so they can only modify static variables
@@ -332,7 +349,7 @@ TEST(MallocGuardTest, ThreadLocalCallbackOverridesGlobalCallback) {
   EXPECT_EQ(local_called.load(), 4u);
 }
 
-TEST(MallocGuardTest, ScopedMallocGuardIgnoreWorks) {
+TEST_F(MallocGuardTest, ScopedMallocGuardIgnoreWorks) {
   ScopedMallocGuardHook hook;
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
   ResetThreadLocalMallocViolations();
@@ -349,7 +366,7 @@ TEST(MallocGuardTest, ScopedMallocGuardIgnoreWorks) {
   EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 0u);
 }
 
-TEST(MallocGuardTest, CallocCaught) {
+TEST_F(MallocGuardTest, CallocCaught) {
   ScopedMallocGuardHook hook;
   MallocGuard guard;
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
@@ -363,7 +380,7 @@ TEST(MallocGuardTest, CallocCaught) {
   EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 40u);
 }
 
-TEST(MallocGuardTest, ReallocCaught) {
+TEST_F(MallocGuardTest, ReallocCaught) {
   ScopedMallocGuardHook hook;
   void* ptr = malloc(4);
 
@@ -382,7 +399,7 @@ TEST(MallocGuardTest, ReallocCaught) {
   EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 8u);
 }
 
-TEST(MallocGuardTest, PosixMemalignCaught) {
+TEST_F(MallocGuardTest, PosixMemalignCaught) {
   ScopedMallocGuardHook hook;
   MallocGuard guard;
   SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
@@ -414,7 +431,7 @@ int Worker(unsigned int seed) {
   return min.front();
 }
 
-TEST(MallocGuardTest, MallocGuardStacksProperly) {
+TEST_F(MallocGuardTest, MallocGuardStacksProperly) {
   ScopedMallocGuardHook hook;
   EXPECT_FALSE(MallocGuard::IsMallocGuarded());
   {
@@ -429,7 +446,7 @@ TEST(MallocGuardTest, MallocGuardStacksProperly) {
   EXPECT_FALSE(MallocGuard::IsMallocGuarded());
 }
 
-TEST(MallocGuardTest, DeeplyNestedGuardAndIgnoreStacksProperly) {
+TEST_F(MallocGuardTest, DeeplyNestedGuardAndIgnoreStacksProperly) {
   ScopedMallocGuardHook hook;
   EXPECT_FALSE(MallocGuard::IsMallocGuarded());
   {
@@ -459,12 +476,10 @@ TEST(MallocGuardTest, DeeplyNestedGuardAndIgnoreStacksProperly) {
   EXPECT_FALSE(MallocGuard::IsMallocGuarded());
 }
 
-TEST(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocation) {
+TEST_F(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocation) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
 
-  void* handle =
-      dlopen("./libmalloc_guard_test_lib.so", RTLD_NOW | RTLD_DEEPBIND);
+  void* handle = dlopen(kTestLibPath, RTLD_NOW);
   ASSERT_NE(handle, nullptr) << dlerror();
 
   auto test_malloc =
@@ -487,12 +502,10 @@ TEST(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocation) {
   dlclose(handle);
 }
 
-TEST(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocationLazy) {
+TEST_F(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocationLazy) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
 
-  void* handle =
-      dlopen("./libmalloc_guard_test_lib.so", RTLD_LAZY | RTLD_DEEPBIND);
+  void* handle = dlopen(kTestLibPath, RTLD_LAZY);
   ASSERT_NE(handle, nullptr) << dlerror();
 
   auto test_malloc =
@@ -515,12 +528,11 @@ TEST(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocationLazy) {
   dlclose(handle);
 }
 
-TEST(MallocGuardTest, DynamicGotHookDenylistIgnoresAllocation) {
+TEST_F(MallocGuardTest, DynamicGotHookDenylistIgnoresAllocation) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({"./libmalloc_guard_test_lib_allowed.so"});
+  SetMallocGuardDenylist({kAllowedTestLibPath});
 
-  void* handle_allowed =
-      dlopen("./libmalloc_guard_test_lib_allowed.so", RTLD_NOW | RTLD_DEEPBIND);
+  void* handle_allowed = dlopen(kAllowedTestLibPath, RTLD_NOW);
   ASSERT_NE(handle_allowed, nullptr) << dlerror();
 
   auto test_malloc =
@@ -542,15 +554,12 @@ TEST(MallocGuardTest, DynamicGotHookDenylistIgnoresAllocation) {
   }
 
   dlclose(handle_allowed);
-  SetMallocGuardDenylist({});
 }
 
-TEST(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocationDlmopen) {
+TEST_F(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocationDlmopen) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
 
-  void* handle = dlmopen(LM_ID_BASE, "./libmalloc_guard_test_lib.so",
-                         RTLD_NOW | RTLD_DEEPBIND);
+  void* handle = dlmopen(LM_ID_BASE, kTestLibPath, RTLD_NOW);
   ASSERT_NE(handle, nullptr) << dlerror();
 
   auto test_malloc =
@@ -573,13 +582,11 @@ TEST(MallocGuardTest, DynamicGotHookEmptyDenylistCatchesAllocationDlmopen) {
   dlclose(handle);
 }
 
-TEST(MallocGuardTest, DynamicGotHookDenylistIgnoresAllocationDlmopen) {
+TEST_F(MallocGuardTest, DynamicGotHookDenylistIgnoresAllocationDlmopen) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({"./libmalloc_guard_test_lib_allowed.so"});
+  SetMallocGuardDenylist({kAllowedTestLibPath});
 
-  void* handle_allowed =
-      dlmopen(LM_ID_BASE, "./libmalloc_guard_test_lib_allowed.so",
-              RTLD_NOW | RTLD_DEEPBIND);
+  void* handle_allowed = dlmopen(LM_ID_BASE, kAllowedTestLibPath, RTLD_NOW);
   ASSERT_NE(handle_allowed, nullptr) << dlerror();
 
   auto test_malloc =
@@ -601,16 +608,13 @@ TEST(MallocGuardTest, DynamicGotHookDenylistIgnoresAllocationDlmopen) {
   }
 
   dlclose(handle_allowed);
-  SetMallocGuardDenylist({});
 }
 
-TEST(MallocGuardTest,
-     DynamicGotHookEmptyDenylistCatchesAllocationLeadsToAbort) {
+TEST_F(MallocGuardTest,
+       DynamicGotHookEmptyDenylistCatchesAllocationLeadsToAbort) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
 
-  void* handle =
-      dlopen("./libmalloc_guard_test_lib.so", RTLD_NOW | RTLD_DEEPBIND);
+  void* handle = dlopen(kTestLibPath, RTLD_NOW);
   ASSERT_NE(handle, nullptr) << dlerror();
 
   auto test_malloc =
@@ -630,92 +634,239 @@ TEST(MallocGuardTest,
   dlclose(handle);
 }
 
-TEST(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocation) {
+TEST_F(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocation) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
 
   EXPECT_DEATH(
       {
-        void* handle = dlopen("./libmalloc_guard_test_custom_malloc_lib.so",
-                              RTLD_NOW | RTLD_DEEPBIND);
+        void* handle = dlopen(kCustomMallocTestLibPath, RTLD_NOW);
         (void)handle;
       },
-      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
-      "'.*'");
+      "uses a different allocator");
 }
 
-TEST(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazy) {
+TEST_F(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazy) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
 
   EXPECT_DEATH(
       {
-        void* handle = dlopen("./libmalloc_guard_test_custom_malloc_lib.so",
-                              RTLD_LAZY | RTLD_DEEPBIND);
+        void* handle = dlopen(kCustomMallocTestLibPath, RTLD_LAZY);
         (void)handle;
       },
-      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
-      "'.*'");
+      "uses a different allocator");
 }
 
-TEST(MallocGuardTest,
-     DynamicGotHookCatchesCustomMallocAllocationLazyNoDeepbind) {
+TEST_F(MallocGuardTest, DynamicGotHookDiesWithDeepbind) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
+
+  // RTLD_DEEPBIND makes the loaded library prefer its own symbol definitions,
+  // which defeats interception. MallocGuard refuses rather than silently
+  // under-reporting.
+  //
+  // We deliberately load the custom-allocator library here: it would *also*
+  // trip the "different allocator" check, so this additionally pins down that
+  // the RTLD_DEEPBIND check takes precedence.
+  EXPECT_DEATH(
+      {
+        void* handle =
+            dlopen(kCustomMallocTestLibPath, RTLD_LAZY | RTLD_DEEPBIND);
+        (void)handle;
+      },
+      "MallocGuard does not support loading libraries with RTLD_DEEPBIND.");
+}
+
+TEST_F(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazyNoLoad) {
+  ScopedMallocGuardHook hook;
+
+  void* handle = dlopen(kCustomMallocTestLibPath, RTLD_LAZY | RTLD_NOLOAD);
+  EXPECT_EQ(handle, nullptr);
+}
+
+TEST_F(MallocGuardTest,
+       DynamicGotHookCatchesCustomMallocAllocationAlreadyLoadedNoLoad) {
+  void* initial_handle = dlopen(kCustomMallocTestLibPath, RTLD_LAZY);
+  ASSERT_NE(initial_handle, nullptr);
+
+  ScopedMallocGuardHook hook;
 
   EXPECT_DEATH(
       {
         void* handle =
-            dlopen("./libmalloc_guard_test_custom_malloc_lib.so", RTLD_LAZY);
+            dlopen(kCustomMallocTestLibPath, RTLD_LAZY | RTLD_NOLOAD);
         (void)handle;
       },
-      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
-      "'.*'");
-}
-
-TEST(MallocGuardTest,
-     DynamicGotHookCatchesCustomMallocAllocationLazyNoLoadNoDeepbind) {
-  ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
-
-  void* handle = dlopen("./libmalloc_guard_test_custom_malloc_lib.so",
-                        RTLD_LAZY | RTLD_NOLOAD);
-  EXPECT_EQ(handle, nullptr);
-}
-
-TEST(MallocGuardTest,
-     DynamicGotHookCatchesCustomMallocAllocationAlreadyLoadedNoLoad) {
-  void* initial_handle = dlopen("./libmalloc_guard_test_custom_malloc_lib.so",
-                                RTLD_LAZY | RTLD_DEEPBIND);
-  ASSERT_NE(initial_handle, nullptr);
-
-  ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
-
-  EXPECT_DEATH(
-      {
-        void* handle = dlopen("./libmalloc_guard_test_custom_malloc_lib.so",
-                              RTLD_LAZY | RTLD_NOLOAD);
-        (void)handle;
-      },
-      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
-      "'.*'");
+      "uses a different allocator");
 
   dlclose(initial_handle);
 }
 
-TEST(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazyGlobal) {
+TEST_F(MallocGuardTest, DynamicGotHookCatchesCustomMallocAllocationLazyGlobal) {
   ScopedMallocGuardHook hook;
-  SetMallocGuardDenylist({});
 
   EXPECT_DEATH(
       {
-        void* handle = dlopen("./libmalloc_guard_test_custom_malloc_lib.so",
-                              RTLD_LAZY | RTLD_GLOBAL);
+        void* handle =
+            dlopen(kCustomMallocTestLibPath, RTLD_LAZY | RTLD_GLOBAL);
         (void)handle;
       },
-      "FATAL ERROR: Detected custom allocator in dynamically loaded library "
-      "'.*'");
+      "uses a different allocator");
+}
+
+TEST_F(MallocGuardTest, CAndCppAllocationsExactByteCount) {
+  ScopedMallocGuardHook hook;
+  SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
+  ResetThreadLocalMallocViolations();
+
+  MallocGuard guard;
+
+  // 1. malloc
+  void* volatile p_malloc = malloc(32);
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 1u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 32u);
+  free(const_cast<void*>(p_malloc));
+
+  // 2. calloc
+  void* volatile p_calloc = calloc(4, 8);
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 2u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 32u + 32u);
+  free(const_cast<void*>(p_calloc));
+
+  // 3. realloc
+  void* volatile p_realloc = malloc(16);
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 3u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 64u + 16u);
+  p_realloc = realloc(const_cast<void*>(p_realloc), 64);
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 4u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 80u + 64u);
+  free(const_cast<void*>(p_realloc));
+
+  // 4. posix_memalign
+  void* p_memalign = nullptr;
+  ASSERT_EQ(posix_memalign(&p_memalign, 64, 128), 0);
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 5u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes, 144u + 128u);
+  free(p_memalign);
+
+  // 5. scalar new
+  int32_t* volatile p_new = new int32_t(7);
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 6u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes,
+            272u + sizeof(int32_t));
+  delete p_new;
+
+  // 6. array new[]
+  const size_t before_arr = GetThreadLocalMallocViolations().allocated_bytes;
+  int32_t* volatile p_arr = new int32_t[10];
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 7u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes,
+            before_arr + 10 * sizeof(int32_t));
+  delete[] p_arr;
+
+  // 7. ReportAllocation direct call
+  const size_t before_report = GetThreadLocalMallocViolations().allocated_bytes;
+  ReportAllocation(256);
+  EXPECT_EQ(GetThreadLocalMallocViolations().num_violations, 8u);
+  EXPECT_EQ(GetThreadLocalMallocViolations().allocated_bytes,
+            before_report + 256u);
+
+  SetThreadLocalMallocGuardReaction(std::nullopt);
+}
+
+TEST_F(MallocGuardTest, SharedLibraryAllocationNoDoubleCount) {
+  ScopedMallocGuardHook hook;
+
+  void* handle = dlopen(kTestLibPath, RTLD_NOW);
+  ASSERT_NE(handle, nullptr) << dlerror();
+
+  auto test_malloc =
+      reinterpret_cast<void* (*)(size_t)>(dlsym(handle, "TestMalloc"));
+  auto test_free = reinterpret_cast<void (*)(void*)>(dlsym(handle, "TestFree"));
+  auto test_new = reinterpret_cast<int* (*)()>(dlsym(handle, "TestNew"));
+  auto test_delete =
+      reinterpret_cast<void (*)(int*)>(dlsym(handle, "TestDelete"));
+  ASSERT_NE(test_malloc, nullptr);
+  ASSERT_NE(test_free, nullptr);
+  ASSERT_NE(test_new, nullptr);
+  ASSERT_NE(test_delete, nullptr);
+
+  size_t violations_after_malloc = 0;
+  size_t bytes_after_malloc = 0;
+  size_t violations_after_new = 0;
+  size_t bytes_after_new = 0;
+  {
+    SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
+    ResetThreadLocalMallocViolations();
+    MallocGuard guard;
+
+    void* ptr = test_malloc(32);
+    test_free(ptr);
+    violations_after_malloc = GetThreadLocalMallocViolations().num_violations;
+    bytes_after_malloc = GetThreadLocalMallocViolations().allocated_bytes;
+
+    int* new_ptr = test_new();
+    test_delete(new_ptr);
+    violations_after_new = GetThreadLocalMallocViolations().num_violations;
+    bytes_after_new = GetThreadLocalMallocViolations().allocated_bytes;
+  }
+  EXPECT_EQ(violations_after_malloc, 1u);
+  EXPECT_EQ(bytes_after_malloc, 32u);
+  EXPECT_EQ(violations_after_new, 2u);
+  EXPECT_EQ(bytes_after_new, 32u + sizeof(int));
+
+  SetThreadLocalMallocGuardReaction(std::nullopt);
+  dlclose(handle);
+}
+
+// Denylisting works at the granularity of GOT/PLT entries, so it can only
+// suppress allocations made from call sites *inside* the denylisted library.
+TEST_F(MallocGuardTest, DenylistScopeForCAndCppAllocation) {
+  ScopedMallocGuardHook hook;
+  SetMallocGuardDenylist({kAllowedTestLibPath});
+
+  void* handle_allowed = dlopen(kAllowedTestLibPath, RTLD_NOW);
+  ASSERT_NE(handle_allowed, nullptr) << dlerror();
+
+  auto test_malloc =
+      reinterpret_cast<void* (*)(size_t)>(dlsym(handle_allowed, "TestMalloc"));
+  auto test_free =
+      reinterpret_cast<void (*)(void*)>(dlsym(handle_allowed, "TestFree"));
+  auto test_new =
+      reinterpret_cast<int* (*)()>(dlsym(handle_allowed, "TestNew"));
+  auto test_delete =
+      reinterpret_cast<void (*)(int*)>(dlsym(handle_allowed, "TestDelete"));
+  ASSERT_NE(test_malloc, nullptr);
+  ASSERT_NE(test_free, nullptr);
+  ASSERT_NE(test_new, nullptr);
+  ASSERT_NE(test_delete, nullptr);
+
+  size_t violations_after_malloc = 0;
+  size_t violations_after_new = 0;
+  {
+    SetThreadLocalMallocGuardReaction(MallocGuardReaction::kStoreViolation);
+    ResetThreadLocalMallocViolations();
+    MallocGuard guard;
+
+    void* ptr = test_malloc(32);
+    test_free(ptr);
+    violations_after_malloc = GetThreadLocalMallocViolations().num_violations;
+
+    int* new_ptr = test_new();
+    test_delete(new_ptr);
+    violations_after_new = GetThreadLocalMallocViolations().num_violations;
+  }
+
+  // The library calls malloc() itself, from its own (unhooked) GOT entry.
+  EXPECT_EQ(violations_after_malloc, 0u);
+
+  // `new`, however, is *not* suppressed: the library only calls
+  // `operator new`, and the actual malloc() happens inside the C++ runtime
+  // (libstdc++), which is not denylisted and therefore still hooked. Denylist a
+  // library only to silence its direct C allocations; it cannot hide
+  // allocations that the library delegates to a non-denylisted library.
+  EXPECT_EQ(violations_after_new, 1u);
+
+  SetThreadLocalMallocGuardReaction(std::nullopt);
+  dlclose(handle_allowed);
 }
 
 }  // namespace intrinsic

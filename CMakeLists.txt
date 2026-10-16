@@ -66,6 +66,11 @@ if(BUILD_TESTING)
     target_compile_features(malloc_guard_test PRIVATE cxx_std_20)
     add_test(NAME malloc_guard_test COMMAND malloc_guard_test)
 
+    add_executable(malloc_guard_static_allocator_hook_test test/malloc_guard_static_allocator_hook_test.cc)
+    target_link_libraries(malloc_guard_static_allocator_hook_test PRIVATE malloc_guard gtest_main gmock ${CMAKE_DL_LIBS})
+    target_compile_features(malloc_guard_static_allocator_hook_test PRIVATE cxx_std_20)
+    add_test(NAME malloc_guard_static_allocator_hook_test COMMAND malloc_guard_static_allocator_hook_test)
+
     add_library(malloc_guard_test_lib SHARED test/malloc_guard_test_lib.cc)
     target_compile_features(malloc_guard_test_lib PRIVATE cxx_std_20)
     

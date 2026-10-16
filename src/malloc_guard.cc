@@ -54,13 +54,34 @@ void* malloc_guard_intercept_dlmopen(Lmid_t, const char*, int);
 namespace intrinsic {
 
 static const HookTarget kTargets[] = {
-    {"malloc", (void*)malloc_guard_intercept_malloc},
-    {"calloc", (void*)malloc_guard_intercept_calloc},
-    {"realloc", (void*)malloc_guard_intercept_realloc},
-    {"free", (void*)malloc_guard_intercept_free},
-    {"posix_memalign", (void*)malloc_guard_intercept_posix_memalign},
-    {"dlopen", (void*)malloc_guard_intercept_dlopen},
-    {"dlmopen", (void*)malloc_guard_intercept_dlmopen}};
+    {
+        .name = "malloc",
+        .hook_func = (void*)malloc_guard_intercept_malloc,
+    },
+    {
+        .name = "calloc",
+        .hook_func = (void*)malloc_guard_intercept_calloc,
+    },
+    {
+        .name = "realloc",
+        .hook_func = (void*)malloc_guard_intercept_realloc,
+    },
+    {
+        .name = "free",
+        .hook_func = (void*)malloc_guard_intercept_free,
+    },
+    {
+        .name = "posix_memalign",
+        .hook_func = (void*)malloc_guard_intercept_posix_memalign,
+    },
+    {
+        .name = "dlopen",
+        .hook_func = (void*)malloc_guard_intercept_dlopen,
+    },
+    {
+        .name = "dlmopen",
+        .hook_func = (void*)malloc_guard_intercept_dlmopen,
+    }};
 
 static constexpr const char* kAllocatorSymbols[] = {
     "malloc", "calloc", "realloc", "free", "posix_memalign"};
@@ -121,13 +142,23 @@ std::array<char, kMaxPosixThreadNameLen> GetNameOfCurrentThread() {
   return buf;
 }
 
-static void HandleMallocGuardViolation(size_t size) {
-  static thread_local bool in_malloc_hook = false;
+thread_local int in_malloc_hook = 0;
+struct ScopedInMallocHook {
+  ScopedInMallocHook() { ++in_malloc_hook; }
+  ~ScopedInMallocHook() { --in_malloc_hook; }
+  ScopedInMallocHook(const ScopedInMallocHook&) = delete;
+  ScopedInMallocHook& operator=(const ScopedInMallocHook&) = delete;
+};
+bool IsInMallocHook() { return in_malloc_hook > 0; }
+
+}  // end anonymous namespace
+
+void ReportAllocation(size_t size) {
   // Prevent recursive loop due to printing in MallocGuardReaction::kAbort mode.
-  if (in_malloc_hook) {
+  if (IsInMallocHook()) [[unlikely]] {
     return;
   }
-  in_malloc_hook = true;
+  ScopedInMallocHook in_malloc_hook;
   if (MallocGuard::IsMallocGuarded()) [[unlikely]] {
     const MallocGuardReaction reaction = GetCurrentMallocGuardReaction();
 
@@ -190,10 +221,7 @@ static void HandleMallocGuardViolation(size_t size) {
         break;
     }
   }
-  in_malloc_hook = false;
 }
-
-}  // end anonymous namespace
 
 namespace internal {
 
@@ -378,19 +406,40 @@ bool InstallMallocGuardHooks() {
   static std::once_flag init_once;
   std::call_once(init_once, []() {});
 
-  if (CheckMallocHandlerInstalled(true)) {
-    // Handler is already installed, nothing to do.
-    return true;
+  const bool have_custom_setup = MallocGuardCustomSetup != nullptr;
+  const bool have_custom_teardown = MallocGuardCustomTeardown != nullptr;
+  if (have_custom_setup != have_custom_teardown) {
+    RtSafeLog(
+        "There is a definition for only one of `MallocGuardCustomSetup()` and "
+        "`MallocGuardCustomTeardown()`. You must provide both or neither!");
+    std::exit(1);
   }
-
-  if (!intrinsic::InstallDynamicGotHooks(kTargets)) {
+  if (have_custom_setup && !MallocGuardCustomSetup()) {
+    RtSafeLog("Failed to set up static allocator hook.");
     --malloc_guard_install_counter;
     return false;
   }
+
+  if (!intrinsic::InstallDynamicGotHooks(kTargets)) {
+    if (have_custom_teardown && !MallocGuardCustomTeardown()) {
+      RtSafeLog(
+          "Failed to tear down static allocator hook after an error in "
+          "InstallMallocGuardHooks().");
+    }
+
+    --malloc_guard_install_counter;
+    return false;
+  }
+
   if (auto s = CheckMallocHandlerInstalled(false); !s) {
     RtSafeLog("Dynamic GOT hooks failed to intercept malloc.");
     --malloc_guard_install_counter;
     intrinsic::UninstallDynamicGotHooks(kTargets);
+    if (have_custom_teardown && !MallocGuardCustomTeardown()) {
+      RtSafeLog(
+          "Failed to tear down static allocator hook after an error after "
+          "CheckMallocHandlerInstalled().");
+    }
     return s;
   }
 
@@ -401,8 +450,17 @@ bool UninstallMallocGuardHooks() {
   std::lock_guard<std::mutex> lock(malloc_guard_install_counter_mutex);
   int new_value = --malloc_guard_install_counter;
   if (new_value == 0) {
-    RtSafeLog("Removing malloc_guard hook");
-    if (!intrinsic::UninstallDynamicGotHooks(kTargets)) {
+    RtSafeLog("Removing malloc_guard hook.");
+    bool got_ok = intrinsic::UninstallDynamicGotHooks(kTargets);
+    bool custom_teardown_ok =
+        (MallocGuardCustomTeardown == nullptr || MallocGuardCustomTeardown());
+    if (!custom_teardown_ok) {
+      RtSafeLog(
+          "Failed to tear down static allocator hook in "
+          "UninstallMallocGuardHooks().");
+    }
+
+    if (!got_ok || !custom_teardown_ok) {
       return false;
     }
   }
@@ -485,6 +543,15 @@ ScopedMallocGuardIgnore::~ScopedMallocGuardIgnore() {
 }
 
 void SetMallocGuardDenylist(const std::unordered_set<std::string>& denylist) {
+  if (MallocGuardCustomSetup != nullptr &&
+      MallocGuardCustomTeardown != nullptr) {
+    RtSafeLog(
+        "ERROR: This binary defines MallocGuardCustomSetup() and "
+        "MallocGuardCustomTeardown(), so MallocGuard does not support library "
+        "denylisting.");
+    std::exit(1);
+  }
+  ScopedMallocGuardIgnore ignore;
   std::lock_guard<std::mutex> lock(malloc_guard_denylist_mutex);
   malloc_guard_denylist = denylist;
 }
@@ -578,11 +645,16 @@ void* malloc_guard_intercept_malloc(std::size_t size) {
       return calloc_fallback_buffer + current_pos;
     }
     malloc_in_init = true;
-    // We use RTLD_NEXT instead of RTLD_DEFAULT to find the *next* definition
-    // of malloc in the dynamic linker's search order. If we used RTLD_DEFAULT,
-    // dlsym would return a pointer to this very interceptor function, leading
-    // to infinite recursion.
-    func = (MallocFunction*)::dlsym(RTLD_NEXT, "malloc");
+    // We first use RTLD_DEFAULT to find the globally active definition of
+    // malloc (e.g., TCMalloc when linked into the main executable, or glibc's
+    // malloc). If RTLD_DEFAULT returns a pointer to this very interceptor
+    // function (which can happen if our symbol was interposed first), we fall
+    // back to RTLD_NEXT to find the next definition in the dynamic linker's
+    // search order and avoid infinite recursion.
+    func = (MallocFunction*)::dlsym(RTLD_DEFAULT, "malloc");
+    if (func == &malloc_guard_intercept_malloc) {
+      func = (MallocFunction*)::dlsym(RTLD_NEXT, "malloc");
+    }
     malloc_in_init = false;
     if (!func) {
       intrinsic::RtSafeLog("Could not find symbol for malloc.");
@@ -591,12 +663,12 @@ void* malloc_guard_intercept_malloc(std::size_t size) {
     real_malloc.store(func, std::memory_order_release);
   }
 
-  if (intrinsic::AreMallocGuardHooksInstalled()) {
-    intrinsic::HandleMallocGuardViolation(size);
+  if (intrinsic::AreMallocGuardHooksInstalled()) [[unlikely]] {
+    intrinsic::ReportAllocation(size);
   }
+  intrinsic::ScopedMallocGuardIgnore ignore;
   return func(size);
 }
-void* malloc(std::size_t size) { return malloc_guard_intercept_malloc(size); }
 
 // realloc handler
 void* malloc_guard_intercept_realloc(void* ptr, std::size_t size) {
@@ -605,11 +677,16 @@ void* malloc_guard_intercept_realloc(void* ptr, std::size_t size) {
 
   ReallocFunction* func = real_realloc.load(std::memory_order_acquire);
   if (!func) {
-    // We use RTLD_NEXT instead of RTLD_DEFAULT to find the *next* definition
-    // of realloc in the dynamic linker's search order. If we used RTLD_DEFAULT,
-    // dlsym would return a pointer to this very interceptor function, leading
-    // to infinite recursion.
-    func = (ReallocFunction*)::dlsym(RTLD_NEXT, "realloc");
+    // We first use RTLD_DEFAULT to find the globally active definition of
+    // realloc (e.g., TCMalloc when linked into the main executable, or glibc's
+    // realloc). If RTLD_DEFAULT returns a pointer to this very interceptor
+    // function (which can happen if our symbol was interposed first), we fall
+    // back to RTLD_NEXT to find the next definition in the dynamic linker's
+    // search order and avoid infinite recursion.
+    func = (ReallocFunction*)::dlsym(RTLD_DEFAULT, "realloc");
+    if (func == &malloc_guard_intercept_realloc) {
+      func = (ReallocFunction*)::dlsym(RTLD_NEXT, "realloc");
+    }
     if (!func) {
       intrinsic::RtSafeLog("Could not find symbol for realloc.");
       std::exit(1);
@@ -617,13 +694,11 @@ void* malloc_guard_intercept_realloc(void* ptr, std::size_t size) {
     real_realloc.store(func, std::memory_order_release);
   }
 
-  if (intrinsic::AreMallocGuardHooksInstalled()) {
-    intrinsic::HandleMallocGuardViolation(size);
+  if (intrinsic::AreMallocGuardHooksInstalled()) [[unlikely]] {
+    intrinsic::ReportAllocation(size);
   }
+  intrinsic::ScopedMallocGuardIgnore ignore;
   return func(ptr, size);
-}
-void* realloc(void* ptr, std::size_t size) {
-  return malloc_guard_intercept_realloc(ptr, size);
 }
 
 // posix_memalign handler
@@ -635,11 +710,16 @@ int malloc_guard_intercept_posix_memalign(void** memptr, size_t alignment,
   PosixMemalignFunction* func =
       real_posix_memalign.load(std::memory_order_acquire);
   if (!func) {
-    // We use RTLD_NEXT instead of RTLD_DEFAULT to find the *next* definition
-    // of posix_memalign in the dynamic linker's search order. If we used
-    // RTLD_DEFAULT, dlsym would return a pointer to this very interceptor
-    // function, leading to infinite recursion.
-    func = (PosixMemalignFunction*)::dlsym(RTLD_NEXT, "posix_memalign");
+    // We first use RTLD_DEFAULT to find the globally active definition of
+    // posix_memalign (e.g., TCMalloc when linked into the main executable, or
+    // glibc's posix_memalign). If RTLD_DEFAULT returns a pointer to this very
+    // interceptor function (which can happen if our symbol was interposed
+    // first), we fall back to RTLD_NEXT to find the next definition in the
+    // dynamic linker's search order and avoid infinite recursion.
+    func = (PosixMemalignFunction*)::dlsym(RTLD_DEFAULT, "posix_memalign");
+    if (func == &malloc_guard_intercept_posix_memalign) {
+      func = (PosixMemalignFunction*)::dlsym(RTLD_NEXT, "posix_memalign");
+    }
     if (!func) {
       intrinsic::RtSafeLog("Could not find symbol for posix_memalign.");
       std::exit(1);
@@ -647,13 +727,11 @@ int malloc_guard_intercept_posix_memalign(void** memptr, size_t alignment,
     real_posix_memalign.store(func, std::memory_order_release);
   }
 
-  if (intrinsic::AreMallocGuardHooksInstalled()) {
-    intrinsic::HandleMallocGuardViolation(size);
+  if (intrinsic::AreMallocGuardHooksInstalled()) [[unlikely]] {
+    intrinsic::ReportAllocation(size);
   }
+  intrinsic::ScopedMallocGuardIgnore ignore;
   return func(memptr, alignment, size);
-}
-int posix_memalign(void** memptr, size_t alignment, size_t size) {
-  return malloc_guard_intercept_posix_memalign(memptr, alignment, size);
 }
 
 // calloc handler
@@ -675,11 +753,16 @@ void* malloc_guard_intercept_calloc(std::size_t nmemb, std::size_t size) {
       return calloc_fallback_buffer + current_pos;
     }
     calloc_in_init = true;
-    // We use RTLD_NEXT instead of RTLD_DEFAULT to find the *next* definition
-    // of calloc in the dynamic linker's search order. If we used RTLD_DEFAULT,
-    // dlsym would return a pointer to this very interceptor function, leading
-    // to infinite recursion.
-    func = (CallocFunction*)::dlsym(RTLD_NEXT, "calloc");
+    // We first use RTLD_DEFAULT to find the globally active definition of
+    // calloc (e.g., TCMalloc when linked into the main executable, or glibc's
+    // calloc). If RTLD_DEFAULT returns a pointer to this very interceptor
+    // function (which can happen if our symbol was interposed first), we fall
+    // back to RTLD_NEXT to find the next definition in the dynamic linker's
+    // search order and avoid infinite recursion.
+    func = (CallocFunction*)::dlsym(RTLD_DEFAULT, "calloc");
+    if (func == &malloc_guard_intercept_calloc) {
+      func = (CallocFunction*)::dlsym(RTLD_NEXT, "calloc");
+    }
     calloc_in_init = false;
     if (!func) {
       intrinsic::RtSafeLog("Could not find symbol for calloc.");
@@ -688,13 +771,11 @@ void* malloc_guard_intercept_calloc(std::size_t nmemb, std::size_t size) {
     real_calloc.store(func, std::memory_order_release);
   }
 
-  if (intrinsic::AreMallocGuardHooksInstalled()) {
-    intrinsic::HandleMallocGuardViolation(nmemb * size);
+  if (intrinsic::AreMallocGuardHooksInstalled()) [[unlikely]] {
+    intrinsic::ReportAllocation(nmemb * size);
   }
+  intrinsic::ScopedMallocGuardIgnore ignore;
   return func(nmemb, size);
-}
-void* calloc(std::size_t nmemb, std::size_t size) {
-  return malloc_guard_intercept_calloc(nmemb, size);
 }
 
 // free handler
@@ -713,11 +794,16 @@ void malloc_guard_intercept_free(void* ptr) {
       return;
     }
     free_in_init = true;
-    // We use RTLD_NEXT instead of RTLD_DEFAULT to find the *next* definition
-    // of free in the dynamic linker's search order. If we used RTLD_DEFAULT,
-    // dlsym would return a pointer to this very interceptor function, leading
-    // to infinite recursion.
-    func = (FreeFunction*)::dlsym(RTLD_NEXT, "free");
+    // We first use RTLD_DEFAULT to find the globally active definition of
+    // free (e.g., TCMalloc when linked into the main executable, or glibc's
+    // free). If RTLD_DEFAULT returns a pointer to this very interceptor
+    // function (which can happen if our symbol was interposed first), we fall
+    // back to RTLD_NEXT to find the next definition in the dynamic linker's
+    // search order and avoid infinite recursion.
+    func = (FreeFunction*)::dlsym(RTLD_DEFAULT, "free");
+    if (func == &malloc_guard_intercept_free) {
+      func = (FreeFunction*)::dlsym(RTLD_NEXT, "free");
+    }
     free_in_init = false;
     if (!func) {
       return;
@@ -726,9 +812,15 @@ void malloc_guard_intercept_free(void* ptr) {
   }
   func(ptr);
 }
-void free(void* ptr) { malloc_guard_intercept_free(ptr); }
 
 static thread_local int dl_intercept_depth = 0;
+
+struct ScopedDlopenIntercept {
+  ScopedDlopenIntercept() { ++dl_intercept_depth; }
+  ~ScopedDlopenIntercept() { --dl_intercept_depth; }
+  ScopedDlopenIntercept(const ScopedDlopenIntercept&) = delete;
+  ScopedDlopenIntercept& operator=(const ScopedDlopenIntercept&) = delete;
+};
 
 // dlopen handler
 void* malloc_guard_intercept_dlopen(const char* filename, int flags) {
@@ -737,11 +829,15 @@ void* malloc_guard_intercept_dlopen(const char* filename, int flags) {
 
   DlopenFunction* func = real_dlopen.load(std::memory_order_acquire);
   if (!func) {
-    // We use RTLD_NEXT instead of RTLD_DEFAULT to find the *next* definition
-    // of dlopen in the dynamic linker's search order. If we used RTLD_DEFAULT,
-    // dlsym would return a pointer to this very interceptor function, leading
-    // to infinite recursion.
-    func = (DlopenFunction*)::dlsym(RTLD_NEXT, "dlopen");
+    // We first use RTLD_DEFAULT to find the globally active definition of
+    // dlopen. If RTLD_DEFAULT returns a pointer to this very interceptor
+    // function (which can happen if our symbol was interposed first), we fall
+    // back to RTLD_NEXT to find the next definition in the dynamic linker's
+    // search order and avoid infinite recursion.
+    func = (DlopenFunction*)::dlsym(RTLD_DEFAULT, "dlopen");
+    if (func == &malloc_guard_intercept_dlopen) {
+      func = (DlopenFunction*)::dlsym(RTLD_NEXT, "dlopen");
+    }
     if (!func) {
       intrinsic::RtSafeLog("Could not find symbol for dlopen.");
       std::exit(1);
@@ -749,55 +845,61 @@ void* malloc_guard_intercept_dlopen(const char* filename, int flags) {
     real_dlopen.store(func, std::memory_order_release);
   }
 
-  dl_intercept_depth++;
+  // Bypass the interceptor if we are currently inside a plthook operation.
+  // `plthook_open()` internally calls `dlopen(..., RTLD_NOLOAD)` while
+  // iterating over loaded libraries, which must not trigger custom-allocator
+  // checks or recursive GOT re-hooking.
+  if (intrinsic::IsInPlthookOperation()) {
+    return func(filename, flags);
+  }
+
+  ScopedDlopenIntercept dlopen_intercept;
   void* handle = func(filename, flags);
 
   if (handle && filename != nullptr &&
-      intrinsic::AreMallocGuardHooksInstalled()) {
+      intrinsic::AreMallocGuardHooksInstalled()) [[unlikely]] {
+    if (flags & RTLD_DEEPBIND) {
+      intrinsic::RtSafeLog(
+          "FATAL ERROR: MallocGuard does not support loading libraries with "
+          "RTLD_DEEPBIND.");
+      std::exit(1);
+    }
     intrinsic::ScopedMallocGuardIgnore ignore;
 
-    // Check if the newly loaded library introduces its own custom allocator.
-    // We compare the symbol resolved within the new handle (local_sym) against
-    // the globally active symbol (RTLD_DEFAULT, e.g.
-    // malloc_guard_intercept_malloc) and the next in the search order
-    // (RTLD_NEXT, e.g. glibc's malloc). The reason we need to compare against
-    // both (RTLD_DEFAULT and RTLD_NEXT), is to distinguish between two cases.
-    // * The dlopen loaded library calls a symbol we track, but not via
-    //   its own custom implementation, rather via the one globally "active".
-    //   Therefore local_sym would be equal to RTLD_DEFAULT or RTLD_NEXT.
-    // * The dlopen loaded library calls a symbol we track, but also
-    //   provides its own custom implementation (e.g. via tcmalloc).
-    //   Therefore local_sym is a newly introduced and unknown symbol. Derived
-    //   from this observation we conclude a custom allocator was dlopen loaded,
-    //   which the MallocGuard does not support!
+    // Check if the newly loaded library defines its own custom allocator
+    // functions. We compare the library's symbol address (`local_sym`) against
+    // * `RTLD_DEFAULT`, the globally active allocator that our interceptor
+    //   functions use. However, certain library configurations can cause this
+    //   to be different, even though the function calls in that library still
+    //   resolve to the global definitions. To cover those cases, we also
+    //   check...
+    // * `RTLD_NEXT`, which should *also* resolve to that same allocator.
+    // If `local_sym` is different from both, the library uses a different
+    // allocator and we raise an error.
     for (const char* sym : intrinsic::kAllocatorSymbols) {
       void* local_sym = ::dlsym(handle, sym);
-      if (local_sym != nullptr) {
-        void* global_sym = ::dlsym(RTLD_DEFAULT, sym);
-        void* next_sym = ::dlsym(RTLD_NEXT, sym);
-        if (local_sym != global_sym && local_sym != next_sym) {
-          intrinsic::RtSafeLog(
-              "FATAL ERROR: Detected custom allocator in dynamically loaded "
-              "library '",
-              filename,
-              "'. MallocGuard does not support this, consider excluding the "
-              "library from checks using `SetMallocGuardDenylist()`");
-          std::exit(1);
-        }
+      if (local_sym == nullptr) {
+        continue;
+      }
+      void* global_sym = ::dlsym(RTLD_DEFAULT, sym);
+      void* next_sym = ::dlsym(RTLD_NEXT, sym);
+      if (local_sym != global_sym && local_sym != next_sym) {
+        intrinsic::RtSafeLog(
+            "FATAL ERROR: Library '", filename,
+            "' uses a different allocator than the main binary. MallocGuard "
+            "does not support this, consider excluding the library from checks "
+            "using `SetMallocGuardDenylist()`.");
+        std::exit(1);
       }
     }
 
-    // Only re-apply GOT hooks when the outermost load finishes
+    // Only re-apply GOT hooks when the outermost load finishes.
     if (dl_intercept_depth == 1) {
       intrinsic::InstallDynamicGotHooks(intrinsic::kTargets);
     }
   }
 
-  dl_intercept_depth--;
   return handle;
-}
-void* dlopen(const char* filename, int flags) {
-  return malloc_guard_intercept_dlopen(filename, flags);
 }
 
 // dlmopen handler
@@ -808,11 +910,15 @@ void* malloc_guard_intercept_dlmopen(Lmid_t lmid, const char* filename,
 
   DlmopenFunction* func = real_dlmopen.load(std::memory_order_acquire);
   if (!func) {
-    // We use RTLD_NEXT instead of RTLD_DEFAULT to find the *next* definition
-    // of dlmopen in the dynamic linker's search order. If we used RTLD_DEFAULT,
-    // dlsym would return a pointer to this very interceptor function, leading
-    // to infinite recursion.
-    func = (DlmopenFunction*)::dlsym(RTLD_NEXT, "dlmopen");
+    // We first use RTLD_DEFAULT to find the globally active definition of
+    // dlmopen. If RTLD_DEFAULT returns a pointer to this very interceptor
+    // function (which can happen if our symbol was interposed first), we fall
+    // back to RTLD_NEXT to find the next definition in the dynamic linker's
+    // search order and avoid infinite recursion.
+    func = (DlmopenFunction*)::dlsym(RTLD_DEFAULT, "dlmopen");
+    if (func == &malloc_guard_intercept_dlmopen) {
+      func = (DlmopenFunction*)::dlsym(RTLD_NEXT, "dlmopen");
+    }
     if (!func) {
       intrinsic::RtSafeLog("Could not find symbol for dlmopen.");
       std::exit(1);
@@ -820,55 +926,61 @@ void* malloc_guard_intercept_dlmopen(Lmid_t lmid, const char* filename,
     real_dlmopen.store(func, std::memory_order_release);
   }
 
-  dl_intercept_depth++;
+  // Bypass the interceptor if we are currently inside a plthook operation.
+  // `plthook_open()` internally calls `dlopen(..., RTLD_NOLOAD)` while
+  // iterating over loaded libraries, which must not trigger custom-allocator
+  // checks or recursive GOT re-hooking.
+  if (intrinsic::IsInPlthookOperation()) {
+    return func(lmid, filename, flags);
+  }
+
+  ScopedDlopenIntercept dlopen_intercept;
   void* handle = func(lmid, filename, flags);
 
   if (handle && filename != nullptr &&
-      intrinsic::AreMallocGuardHooksInstalled()) {
+      intrinsic::AreMallocGuardHooksInstalled()) [[unlikely]] {
+    if (flags & RTLD_DEEPBIND) {
+      intrinsic::RtSafeLog(
+          "FATAL ERROR: MallocGuard does not support loading libraries with "
+          "RTLD_DEEPBIND.");
+      std::exit(1);
+    }
     intrinsic::ScopedMallocGuardIgnore ignore;
 
-    // Check if the newly loaded library introduces its own custom allocator.
-    // We compare the symbol resolved within the new handle (local_sym) against
-    // the globally active symbol (RTLD_DEFAULT, e.g.
-    // malloc_guard_intercept_malloc) and the next in the search order
-    // (RTLD_NEXT, e.g. glibc's malloc). The reason we need to compare against
-    // both (RTLD_DEFAULT and RTLD_NEXT), is to distinguish between two cases.
-    // * The dlopen loaded library calls a symbol we track, but not via
-    //   its own custom implementation, rather via the one globally "active".
-    //   Therefore local_sym would be equal to RTLD_DEFAULT or RTLD_NEXT.
-    // * The dlopen loaded library calls a symbol we track, but also
-    //   provides its own custom implementation (e.g. via tcmalloc).
-    //   Therefore local_sym is a newly introduced and unknown symbol. Derived
-    //   from this observation we conclude a custom allocator was dlopen loaded,
-    //   which the MallocGuard does not support!
+    // Check if the newly loaded library defines its own custom allocator
+    // functions. We compare the library's symbol address (`local_sym`) against
+    // * `RTLD_DEFAULT`, the globally active allocator that our interceptor
+    //   functions use. However, certain library configurations can cause this
+    //   to be different, even though the function calls in that library still
+    //   resolve to the global definitions. To cover those cases, we also
+    //   check...
+    // * `RTLD_NEXT`, which should *also* resolve to that same allocator.
+    // If `local_sym` is different from both, the library uses a different
+    // allocator and we raise an error.
     for (const char* sym : intrinsic::kAllocatorSymbols) {
       void* local_sym = ::dlsym(handle, sym);
-      if (local_sym != nullptr) {
-        void* global_sym = ::dlsym(RTLD_DEFAULT, sym);
-        void* next_sym = ::dlsym(RTLD_NEXT, sym);
-        if (local_sym != global_sym && local_sym != next_sym) {
-          intrinsic::RtSafeLog(
-              "FATAL ERROR: Detected custom allocator in dynamically loaded "
-              "library '",
-              filename,
-              "'. MallocGuard does not support this, consider excluding the "
-              "library from checks using `SetMallocGuardDenylist()`");
-          std::exit(1);
-        }
+      if (local_sym == nullptr) {
+        continue;
+      }
+      void* global_sym = ::dlsym(RTLD_DEFAULT, sym);
+      void* next_sym = ::dlsym(RTLD_NEXT, sym);
+      if (local_sym != global_sym && local_sym != next_sym) {
+        intrinsic::RtSafeLog(
+            "FATAL ERROR: Library '", filename,
+            "' uses a different allocator than the main binary. MallocGuard "
+            "does not support this, consider excluding the library from checks "
+            "using `SetMallocGuardDenylist()`.");
+        std::exit(1);
       }
     }
 
-    // Only re-apply hooks when the outermost load finishes
+    // Only re-apply GOT hooks when the outermost load finishes.
     if (dl_intercept_depth == 1) {
       intrinsic::InstallDynamicGotHooks(intrinsic::kTargets);
     }
   }
 
-  dl_intercept_depth--;
   return handle;
-}
-void* dlmopen(Lmid_t lmid, const char* filename, int flags) {
-  return malloc_guard_intercept_dlmopen(lmid, filename, flags);
 }
 
 }  // extern "C"

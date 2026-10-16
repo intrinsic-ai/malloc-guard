@@ -46,6 +46,12 @@ bool InstallDynamicGotHooks(std::span<const HookTarget> targets);
 //
 // Returns true on success.
 bool UninstallDynamicGotHooks(std::span<const HookTarget> targets);
+
+// Returns true if the current thread is in the process of installing or
+// uninstalling hooks. The dlopen/dlmopen interceptors check this to avoid
+// intercepting internal dlopen(..., RTLD_NOLOAD) calls made by plthook_open().
+bool IsInPlthookOperation();
+
 }  // namespace intrinsic
 
 #endif  // INTRINSIC_MALLOC_GUARD_PLTHOOK_ELF_H_

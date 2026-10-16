@@ -94,7 +94,7 @@ static int HookLibraryCallback(struct dl_phdr_info* info, size_t size,
 
       if (status == PLTHOOK_SUCCESS) {
         std::lock_guard<std::mutex> map_lock(original_functions_mutex);
-        original_functions_map[libname ? libname : ""][target.name] = oldfunc;
+        original_functions_map[libname_str][target.name] = oldfunc;
       } else if (status != PLTHOOK_FUNCTION_NOT_FOUND) {
         // PLTHOOK_FUNCTION_NOT_FOUND is expected and safe to ignore, since many
         // libraries do not call every target function (e.g., they might not
@@ -176,7 +176,21 @@ static int UnhookLibraryCallback(struct dl_phdr_info* info, size_t size,
   return 0;
 }
 
+namespace {
+thread_local int plthook_operation_depth = 0;
+
+struct ScopedPlthookOperation {
+  ScopedPlthookOperation() { ++plthook_operation_depth; }
+  ~ScopedPlthookOperation() { --plthook_operation_depth; }
+  ScopedPlthookOperation(const ScopedPlthookOperation&) = delete;
+  ScopedPlthookOperation& operator=(const ScopedPlthookOperation&) = delete;
+};
+}  // namespace
+
+bool IsInPlthookOperation() { return plthook_operation_depth > 0; }
+
 bool InstallDynamicGotHooks(std::span<const HookTarget> targets) {
+  ScopedPlthookOperation op_guard;
   // Looping over all shared libraries and the main executable
   if (dl_iterate_phdr(HookLibraryCallback, &targets) != 0) {
     RtSafeLog("Failed to install custom GOT hooks for dynamic loading.");
@@ -187,6 +201,7 @@ bool InstallDynamicGotHooks(std::span<const HookTarget> targets) {
 }
 
 bool UninstallDynamicGotHooks(std::span<const HookTarget> targets) {
+  ScopedPlthookOperation op_guard;
   if (dl_iterate_phdr(UnhookLibraryCallback, &targets) != 0) {
     RtSafeLog("Failed to remove custom GOT hooks.");
     return false;
