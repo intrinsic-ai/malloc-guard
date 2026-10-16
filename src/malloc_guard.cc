@@ -88,6 +88,27 @@ static constexpr const char* kAllocatorSymbols[] = {
 
 namespace {
 
+#if defined(__has_feature)
+#define MALLOC_GUARD_HAS_SANITIZER                                        \
+  (__has_feature(address_sanitizer) || __has_feature(memory_sanitizer) || \
+   __has_feature(thread_sanitizer))
+#else
+#define MALLOC_GUARD_HAS_SANITIZER 0
+#endif
+
+// ASan, MSan and TSan replace the allocator, which conflicts with the malloc
+// hooks, so `MallocGuard` is a no-op when used with them.
+#if defined(ADDRESS_SANITIZER) || defined(__SANITIZE_ADDRESS__) || \
+    defined(MEMORY_SANITIZER) || defined(__SANITIZE_MEMORY__) ||   \
+    defined(THREAD_SANITIZER) || defined(__SANITIZE_THREAD__) ||   \
+    MALLOC_GUARD_HAS_SANITIZER
+constexpr bool kMallocGuardDisabledByAllocatorSanitizer = true;
+#else
+constexpr bool kMallocGuardDisabledByAllocatorSanitizer = false;
+#endif
+
+#undef MALLOC_GUARD_HAS_SANITIZER
+
 // Count of how many times the malloc guard was enabled. Decreased when it was
 // disabled again.
 volatile std::atomic_int malloc_guard_install_counter = 0;
@@ -154,6 +175,9 @@ bool IsInMallocHook() { return in_malloc_hook > 0; }
 }  // end anonymous namespace
 
 void ReportAllocation(size_t size) {
+  if constexpr (kMallocGuardDisabledByAllocatorSanitizer) {
+    return;
+  }
   // Prevent recursive loop due to printing in MallocGuardReaction::kAbort mode.
   if (IsInMallocHook()) [[unlikely]] {
     return;
@@ -254,6 +278,9 @@ void RtSafeLogImpl(const void* ptr) {
 }  // namespace internal
 
 bool CheckMallocHandlerInstalled(bool silent) {
+  if constexpr (kMallocGuardDisabledByAllocatorSanitizer) {
+    return true;
+  }
   bool success = true;
   ResetThreadLocalMallocViolations();
   auto installed_reaction = thread_local_malloc_guard_reaction;
@@ -393,6 +420,15 @@ bool CheckMallocHandlerInstalled(bool silent) {
 }
 
 bool InstallMallocGuardHooks() {
+  if constexpr (kMallocGuardDisabledByAllocatorSanitizer) {
+    static std::once_flag log_once;
+    std::call_once(log_once, []() {
+      RtSafeLog(
+          "INFO: MallocGuard is disabled because an allocator-replacing "
+          "sanitizer (ASan/MSan/TSan) is active.\n");
+    });
+    return true;
+  }
   // We intentionally lock the mutex for the entire duration of this function
   // to prevent race conditions during initialization, not just to protect the
   // counter increment.
@@ -447,6 +483,9 @@ bool InstallMallocGuardHooks() {
 }
 
 bool UninstallMallocGuardHooks() {
+  if constexpr (kMallocGuardDisabledByAllocatorSanitizer) {
+    return true;
+  }
   std::lock_guard<std::mutex> lock(malloc_guard_install_counter_mutex);
   int new_value = --malloc_guard_install_counter;
   if (new_value == 0) {
@@ -476,8 +515,9 @@ bool UninstallMallocGuardHooks() {
   return true;
 }
 
-MallocGuard::MallocGuard(bool ignore) : ignore_(ignore) {
-  if (!ignore) {
+MallocGuard::MallocGuard(bool ignore)
+    : ignore_(ignore || kMallocGuardDisabledByAllocatorSanitizer) {
+  if (!ignore_) {
     if (!AreMallocGuardHooksInstalled()) {
       RtSafeLog(
           "Malloc hook is not enabled. Call InstallMallocGuardHooks() or "
@@ -517,6 +557,9 @@ bool MallocGuard::IsMallocGuarded() {
 }
 
 ScopedMallocGuardIgnore::ScopedMallocGuardIgnore() {
+  if constexpr (kMallocGuardDisabledByAllocatorSanitizer) {
+    return;
+  }
   local_ignore_counter++;
 #if __has_feature(realtime_sanitizer)
   if (local_malloc_guard_counter > 0 && local_ignore_counter == 1) {
@@ -527,6 +570,9 @@ ScopedMallocGuardIgnore::ScopedMallocGuardIgnore() {
 }
 
 ScopedMallocGuardIgnore::~ScopedMallocGuardIgnore() {
+  if constexpr (kMallocGuardDisabledByAllocatorSanitizer) {
+    return;
+  }
   local_ignore_counter--;
 #if __has_feature(realtime_sanitizer)
   if (disabled_rtsan_ && local_ignore_counter == 0) {
