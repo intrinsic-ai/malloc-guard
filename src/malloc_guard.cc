@@ -20,7 +20,6 @@
 #define __has_feature(x) 0
 #endif
 
-#include <asm/unistd_64.h>
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <link.h>
