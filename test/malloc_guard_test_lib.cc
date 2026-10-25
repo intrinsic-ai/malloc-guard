@@ -16,3 +16,5 @@
 
 extern "C" void* TestMalloc(size_t size) { return malloc(size); }
 extern "C" void TestFree(void* ptr) { free(ptr); }
+extern "C" int* TestNew() { return new int(42); }
+extern "C" void TestDelete(int* ptr) { delete ptr; }

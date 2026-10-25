@@ -114,14 +114,50 @@ void RtSafeLog(Args&&... args) {
 // }
 // ```
 //
-// Note: The hook mechanism relies on statically caching pointers to the
-// original allocator functions (e.g., malloc, free). It assumes that
-// the underlying allocator does not change after the first allocation is
-// intercepted. If a custom allocator is loaded via dlopen() after MallocGuard
-// is initialized, it will not be used by the intercepted calls. Additionally,
-// loading a library into a new namespace using dlmopen() with LM_ID_NEWLM
-// is not supported and will result in a fatal error because the newly loaded
-// library will resolve to a different allocator symbol.
+// Most use cases will link their allocators dynamically. If you link your
+// allocator statically, you must *also* statically link a library that
+// implements these two functions:
+//
+// * `MallocGuardCustomSetup()`
+//   Registers hooks (that must call `ReportAllocation()`) with the custom
+//   allocator and returns true on success.
+// * `MallocGuardCustomTeardown()`
+//   Undoes what `MallocGuardCustomSetup()` did, and returns true on success.
+//
+// NOTE: These two functions all run in non-realtime contexts, but the actual
+// hook function should assume it runs in a realtime context and must not block.
+//
+// Note: There are a few unsupported setups. The library does its best to detect
+// them and error out with a helpful message, but there are some things it
+// cannot detect. These are the unsupported setups:
+//
+// * The hook mechanism relies on statically caching pointers to the original
+//   allocator functions (e.g., malloc, free). It assumes that the underlying
+//   allocator does not change after the first allocation is intercepted. If a
+//   custom allocator is loaded via dlopen() after MallocGuard is initialized,
+//   MallocGuard raises a fatal error.
+// * Loading a library into a new namespace using dlmopen() with LM_ID_NEWLM is
+//   not supported and will result in a fatal error because the newly loaded
+//   library will resolve to a different allocator symbol.
+// * Denylisting and `MallocGuardCustomSetup/Teardown` are mutually exclusive.
+//   Attempting to set a denylist if custom setup/teardown functions are present
+//   causes a fatal error.
+// * Loading libraries with RTLD_DEEPBIND is not allowed. Doing so after
+//   `InstallMallocGuardHooks()` causes a fatal error.
+
+// Sets up an allocator hook that reports any allocations to `MallocGuard` via
+// `ReportAllocation()`. `MallocGuard` always pairs calls to this with calls to
+// `MallocGuardCustomTeardown()`.
+//
+// As a function at namespace scope, this has external linkage, so another
+// translation unit can provide a definition.
+__attribute__((weak)) bool MallocGuardCustomSetup();
+
+// Removes the allocator hook that `MallocGuardCustomSetup()` set up.
+//
+// As a function at namespace scope, this has external linkage, so another
+// translation unit can provide a definition.
+__attribute__((weak)) bool MallocGuardCustomTeardown();
 
 enum class MallocGuardReaction {
   kNone,            // Do nothing on violations.
@@ -212,6 +248,13 @@ bool UninstallMallocGuardHooks();
 bool AreMallocGuardHooksInstalled();
 
 bool CheckMallocHandlerInstalled(bool silent = false);
+
+// Reports an allocation of `size` bytes to MallocGuard.
+// Call this from custom allocator hooks (e.g., TCMalloc NewHook).
+//
+// While this function is not realtime safe (after all, we're already in a code
+// path that allocates memory), it does its best to avoid unnecessary blocking.
+void ReportAllocation(size_t size);
 
 // Convenience class to enable/disable the malloc hook based on the lifetime of
 // the instance.
