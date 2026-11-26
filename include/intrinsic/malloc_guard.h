@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <chrono>
-#include <string_view>
 #ifndef INTRINSIC_MALLOC_GUARD_H_
 #define INTRINSIC_MALLOC_GUARD_H_
 
@@ -21,12 +19,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
